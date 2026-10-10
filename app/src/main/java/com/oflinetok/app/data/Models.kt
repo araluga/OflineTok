@@ -9,6 +9,11 @@ data class VideoItem(
     val durationMs: Long,
     val dateAdded: Long,
     val folder: String?,
+    /** File name with extension, e.g. "VID_20240101.mp4". */
+    val fileName: String,
+    /** Directory relative to shared storage, e.g. "DCIM/Camera/". Used to match backups. */
+    val path: String,
+    val size: Long,
 )
 
 data class VideoMeta(

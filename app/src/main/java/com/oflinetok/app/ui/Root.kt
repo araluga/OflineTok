@@ -14,12 +14,14 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -60,6 +62,16 @@ fun OflineTokRoot(vm: AppViewModel = viewModel()) {
         permitted = hasVideoPermission(context)
         partialOnly = hasPartialAccessOnly(context)
         if (permitted) vm.load()
+    }
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) { vm.flushExport() }
+
+    vm.restoreMessage.collectAsStateWithLifecycle().value?.let { msg ->
+        AlertDialog(
+            onDismissRequest = vm::dismissRestoreMessage,
+            title = { Text(msg.title) },
+            text = { Text(msg.body) },
+            confirmButton = { TextButton(onClick = vm::dismissRestoreMessage) { Text("OK") } },
+        )
     }
 
     if (!permitted) {

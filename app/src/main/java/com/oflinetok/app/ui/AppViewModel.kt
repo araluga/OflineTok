@@ -8,12 +8,17 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import android.net.Uri
+import com.oflinetok.app.data.BackupManager
 import com.oflinetok.app.data.MetaStore
+import com.oflinetok.app.data.mergedWith
 import com.oflinetok.app.data.VideoItem
 import com.oflinetok.app.data.VideoMeta
 import com.oflinetok.app.data.VideoRepository
 import com.oflinetok.app.data.normalizeTag
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -31,6 +36,11 @@ import kotlinx.coroutines.withContext
 data class FeedRequest(val title: String, val items: List<VideoItem>, val startIndex: Int)
 
 data class TagCount(val tag: String, val count: Int)
+
+data class BackupStatus(val lastSavedAt: Long, val error: String? = null)
+
+/** Shown in a dialog after the user restores a backup file. */
+data class RestoreMessage(val title: String, val body: String)
 
 data class FolderCount(val folder: String, val count: Int)
 
@@ -52,6 +62,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val metaStore = MetaStore(app)
     private val saveLock = Mutex()
     private val prefs = app.getSharedPreferences("feed", Context.MODE_PRIVATE)
+    private val backup = BackupManager(app)
+    private var exportJob: Job? = null
+
+    private val _backupStatus = MutableStateFlow(BackupStatus(backup.lastBackupAt))
+    val backupStatus: StateFlow<BackupStatus> = _backupStatus.asStateFlow()
+
+    private val _restoreMessage = MutableStateFlow<RestoreMessage?>(null)
+    val restoreMessage: StateFlow<RestoreMessage?> = _restoreMessage.asStateFlow()
 
     private val _videos = MutableStateFlow<List<VideoItem>>(emptyList())
     val videos: StateFlow<List<VideoItem>> = _videos.asStateFlow()
@@ -124,6 +142,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             if (changed || mainFeed.isEmpty()) reshuffle()
             _loading.value = false
             _loaded.value = true
+            scheduleExport() // Also creates the first backup for tags made before backups existed.
         }
     }
 
@@ -240,7 +259,80 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         persist()
     }
 
+    /** Debounced, so a burst of edits writes the backup file once. */
+    private fun scheduleExport() {
+        if (!_loaded.value || _meta.value.values.all { it.isEmpty }) return
+        exportJob?.cancel()
+        exportJob = viewModelScope.launch {
+            delay(2000)
+            runExport()
+        }
+    }
+
+    /** Writes a pending backup right away, e.g. when the app goes to the background. */
+    fun flushExport() {
+        if (exportJob?.isActive != true) return
+        exportJob?.cancel()
+        exportJob = viewModelScope.launch { runExport() }
+    }
+
+    fun exportNow() {
+        exportJob?.cancel()
+        exportJob = viewModelScope.launch { runExport() }
+    }
+
+    private suspend fun runExport() {
+        val videos = _videos.value
+        val meta = _meta.value
+        val result = withContext(Dispatchers.IO) { runCatching { backup.export(videos, meta) } }
+        _backupStatus.value = result.fold(
+            onSuccess = { BackupStatus(backup.lastBackupAt) },
+            onFailure = { BackupStatus(backup.lastBackupAt, it.message ?: "Couldn't write the backup") },
+        )
+    }
+
+    /** Merges a backup file into the current tags; nothing existing is removed. */
+    fun restore(uri: Uri) {
+        viewModelScope.launch {
+            val videos = _videos.value
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val entries = backup.read(uri)
+                    entries.size to BackupManager.match(entries, videos)
+                }
+            }
+            result.onSuccess { (total, matched) ->
+                if (matched.isNotEmpty()) {
+                    _meta.update { all ->
+                        all + matched.mapValues { (id, m) -> all[id]?.mergedWith(m) ?: m }
+                    }
+                    persist()
+                }
+                val missing = total - matched.size
+                _restoreMessage.value = RestoreMessage(
+                    title = if (matched.isEmpty()) "Nothing restored" else "Tags restored",
+                    body = buildString {
+                        append("Restored ${matched.size} of $total videos from the backup.")
+                        if (missing > 0) {
+                            append(" $missing weren't found on this phone. They may have been deleted, renamed or moved.")
+                        }
+                    },
+                )
+            }.onFailure {
+                _restoreMessage.value = RestoreMessage(
+                    "Couldn't restore",
+                    it.message?.takeIf { m -> "OflineTok" in m } ?: "That file couldn't be read as an OflineTok backup.",
+                )
+            }
+        }
+    }
+
+    fun dismissRestoreMessage() {
+        _restoreMessage.value = null
+    }
+
     private fun persist() {
+        scheduleExport()
         viewModelScope.launch(Dispatchers.IO) {
             // Reading the latest value inside the lock means the final write always wins.
             saveLock.withLock { metaStore.save(_meta.value) }

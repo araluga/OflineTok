@@ -67,6 +67,7 @@ fun SearchScreen(vm: AppViewModel) {
     var selected by rememberSaveable { mutableStateOf(listOf<String>()) }
     var untagged by rememberSaveable { mutableStateOf(false) }
     var managing by remember { mutableStateOf(false) }
+    val restore = rememberRestoreLauncher(vm)
 
     val q = normalizeTag(query)
     val visibleTags = allTags.filter { q == null || it.tag.contains(q) || it.tag in selected }
@@ -119,7 +120,9 @@ fun SearchScreen(vm: AppViewModel) {
             EmptyMessage(
                 "No tags yet",
                 "Tap the # button on any video in your feed to tag it. Then you can find it here.",
-            )
+            ) {
+                TextButton(onClick = restore) { Text("Restore tags from a backup") }
+            }
             return@Column
         }
 

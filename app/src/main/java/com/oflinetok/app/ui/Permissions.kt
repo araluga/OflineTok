@@ -35,7 +35,9 @@ val videoPermissions: Array<String> = when {
         Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED,
     )
     Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU -> arrayOf(Manifest.permission.READ_MEDIA_VIDEO)
-    else -> arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+    Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+    // Android 8-9 also need write access for the tag backup in Downloads.
+    else -> arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.WRITE_EXTERNAL_STORAGE)
 }
 
 /** True when the app can see all videos, or (Android 14+) at least the ones the user picked. */

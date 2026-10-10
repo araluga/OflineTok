@@ -15,6 +15,10 @@ A TikTok-style video feed for Android that works **completely offline**: it play
 
 Tags, likes, and favorites are stored in a small JSON file inside the app's private storage. Your video files are never modified.
 
+### Automatic tag backup
+
+After every change, OflineTok also saves a copy to `Download/OflineTok/OflineTok-tags.json`. That file stays on the phone when the app is uninstalled. After a reinstall, or on a new phone (copy the file over), open **Me**, tap the backup icon (top left), then **Restore…**, and pick the file. Videos are matched by folder, file name, and size, so restoring works even though the gallery gives videos new IDs. Restoring only adds tags and never removes any. If the folder has several backups, e.g. `OflineTok-tags (1).json`, pick the newest.
+
 ## Install
 
 1. Open the [Releases](../../releases) page, or the latest run under **Actions** → *Build APK*, and download `OflineTok.apk`.

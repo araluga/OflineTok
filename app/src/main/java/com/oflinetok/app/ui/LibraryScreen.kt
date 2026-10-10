@@ -14,6 +14,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.SettingsBackupRestore
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -27,6 +28,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -52,6 +55,8 @@ fun LibraryScreen(vm: AppViewModel, partialOnly: Boolean, onManageAccess: () -> 
     val allTags by vm.allTags.collectAsStateWithLifecycle()
     val loading by vm.loading.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableIntStateOf(0) }
+    var showBackup by remember { mutableStateOf(false) }
+    val restore = rememberRestoreLauncher(vm)
 
     val favorites = videos.filter { meta[it.id]?.favorite == true }
     val liked = videos.filter { meta[it.id]?.liked == true }
@@ -67,6 +72,9 @@ fun LibraryScreen(vm: AppViewModel, partialOnly: Boolean, onManageAccess: () -> 
             .statusBarsPadding(),
     ) {
         Box(Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
+            IconButton(onClick = { showBackup = true }, modifier = Modifier.align(Alignment.CenterStart)) {
+                Icon(Icons.Filled.SettingsBackupRestore, "Tag backup")
+            }
             Text(
                 "My videos",
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
@@ -91,6 +99,19 @@ fun LibraryScreen(vm: AppViewModel, partialOnly: Boolean, onManageAccess: () -> 
             Stat(liked.size, "Likes")
             Stat(favorites.size, "Favorites")
             Stat(allTags.size, "Tags")
+        }
+
+        // Right after a reinstall there are no tags yet: point at the backup file.
+        if (videos.isNotEmpty() && meta.values.all { it.isEmpty }) {
+            Text(
+                "Reinstalled OflineTok? Tap to restore your tags from the backup in Download/OflineTok.",
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = restore)
+                    .background(TokCyan.copy(alpha = 0.18f))
+                    .padding(12.dp),
+            )
         }
 
         if (partialOnly) {
@@ -138,6 +159,10 @@ fun LibraryScreen(vm: AppViewModel, partialOnly: Boolean, onManageAccess: () -> 
                 modifier = Modifier.padding(top = 2.dp),
             )
         }
+    }
+
+    if (showBackup) {
+        BackupDialog(vm = vm, onRestore = restore, onDismiss = { showBackup = false })
     }
 }
 

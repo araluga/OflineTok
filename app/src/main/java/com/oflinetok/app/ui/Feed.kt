@@ -628,7 +628,7 @@ private fun SeekBar(player: Player, modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun EmptyMessage(title: String, body: String) {
+fun EmptyMessage(title: String, body: String, action: (@Composable () -> Unit)? = null) {
     Column(
         Modifier
             .fillMaxSize()
@@ -639,5 +639,9 @@ fun EmptyMessage(title: String, body: String) {
         Text(title, style = MaterialTheme.typography.titleLarge)
         Spacer(Modifier.height(8.dp))
         Text(body, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+        if (action != null) {
+            Spacer(Modifier.height(12.dp))
+            action()
+        }
     }
 }
