@@ -12,8 +12,8 @@ android {
         applicationId = "com.oflinetok.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 3
-        versionName = "1.2"
+        versionCode = 4
+        versionName = "1.3"
     }
 
     // CI passes the permanent release key through these env vars (see .github/workflows/build.yml),

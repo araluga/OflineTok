@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
@@ -341,6 +342,7 @@ private fun VideoFeed(
                 onDoubleTapLike = { vm.like(item.id) },
                 onFavorite = { vm.toggleFavorite(item.id) },
                 onEditTags = { tagEditorFor = item },
+                onShare = { shareVideo(context, item) },
                 onTagClick = { tag ->
                     val tagged = vm.videos.value.filter { tag in vm.metaFor(it.id).tags }.shuffled()
                     vm.openFeed("#$tag", tagged, 0)
@@ -383,6 +385,7 @@ private fun VideoPage(
     onDoubleTapLike: () -> Unit,
     onFavorite: () -> Unit,
     onEditTags: () -> Unit,
+    onShare: () -> Unit,
     onTagClick: (String) -> Unit,
 ) {
     var heartAt by remember { mutableStateOf(Offset.Zero) }
@@ -517,6 +520,12 @@ private fun VideoPage(
                 tint = if (meta.tags.isNotEmpty()) TokCyan else Color.White,
                 label = if (meta.tags.isEmpty()) "Tag" else "${meta.tags.size} tags",
                 onClick = onEditTags,
+            )
+            SideAction(
+                icon = Icons.Filled.Share,
+                tint = Color.White,
+                label = "Share",
+                onClick = onShare,
             )
         }
 

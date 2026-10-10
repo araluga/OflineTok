@@ -10,6 +10,7 @@ A TikTok-style video feed for Android that works **completely offline**: it play
 - **Favorites**: tap the star.
 - **Tags**: tap **#** to tag a video (separate several with commas, e.g. `cats, funny`). Tap a `#tag` under a video to watch everything with that tag.
 - **Search by tag**: type to filter tags, then select one or more (videos must have *all* selected tags). There's also an **Untagged** filter for finding videos you haven't tagged yet. **Manage** renames, merges, or deletes tags.
+- **Share**: send the current video to Telegram, WhatsApp, Bluetooth, or any other app from the Android share menu.
 - **Me**: stats plus grids of your Favorites, Liked, and All videos.
 - Tap to pause/play. Drag the thin bar at the bottom to seek. Videos loop.
 
