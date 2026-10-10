@@ -15,6 +15,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Full history so release notes can list commits since the last tag.
 
       - uses: actions/setup-java@v4
         with:
@@ -41,9 +43,18 @@ jobs:
           name: OflineTok-apk
           path: OflineTok.apk
 
+      # The app shows these notes in its update dialog, so list commit titles rather than PR links.
+      - name: Write release notes
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          prev=$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)
+          range=${prev:+$prev..}$GITHUB_REF_NAME
+          git log "$range" --no-merges --pretty='- %s' > notes.md
+          cat notes.md
+
       - name: Publish release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: OflineTok.apk
-          generate_release_notes: true
+          body_path: notes.md

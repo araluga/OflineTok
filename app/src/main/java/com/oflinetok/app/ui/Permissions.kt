@@ -74,7 +74,7 @@ fun PermissionScreen(onRequest: () -> Unit) {
         Spacer(Modifier.height(12.dp))
         Text(
             "OflineTok plays the videos from your gallery in a random, swipeable feed. " +
-                "Nothing leaves your phone — the app has no internet access.",
+                "Your videos and tags never leave your phone.",
             textAlign = TextAlign.Center,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

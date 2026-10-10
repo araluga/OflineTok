@@ -1,6 +1,6 @@
 # OflineTok
 
-A TikTok-style video feed for Android that works **completely offline**: it plays the videos from your own gallery in a random, swipeable feed. The app doesn't even request internet permission.
+A TikTok-style video feed for Android that works **completely offline**: it plays the videos from your own gallery in a random, swipeable feed. Your videos and tags never leave the phone.
 
 ## Features
 
@@ -11,6 +11,7 @@ A TikTok-style video feed for Android that works **completely offline**: it play
 - **Tags**: tap **#** to tag a video (separate several with commas, e.g. `cats, funny`). Tap a `#tag` under a video to watch everything with that tag.
 - **Search by tag**: type to filter tags, then select one or more (videos must have *all* selected tags). There's also an **Untagged** filter for finding videos you haven't tagged yet. **Manage** renames, merges, or deletes tags.
 - **Share**: send the current video to Telegram, WhatsApp, Bluetooth, or any other app from the Android share menu.
+- **Updates**: once a day the app quietly asks GitHub whether a newer version exists. If one does, it offers **Update**, **Later**, or **Skip this version**. Nothing is forced. Updating downloads the APK and opens Android's installer. Turn the check off under **Me → ⓘ**. This check and update downloads are the only things the app does online.
 - **Me**: stats plus grids of your Favorites, Liked, and All videos.
 - Tap to pause/play. Drag the thin bar at the bottom to seek. Videos loop.
 

@@ -11,6 +11,11 @@
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
 
+    <!-- Used only for the optional update check on GitHub and downloading an update. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Lets the user install a downloaded update through Android's installer. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
     <application
         android:name=".OflineTokApp"
         android:allowBackup="true"

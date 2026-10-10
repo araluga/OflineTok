@@ -23,6 +23,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -44,8 +45,10 @@ private enum class Tab(val label: String, val selected: ImageVector, val unselec
 }
 
 @Composable
-fun OflineTokRoot(vm: AppViewModel = viewModel()) {
+fun OflineTokRoot(vm: AppViewModel = viewModel(), updates: UpdateViewModel = viewModel()) {
     val context = LocalContext.current
+    LaunchedEffect(Unit) { updates.autoCheck() }
+    if (updates.dialogOpen.collectAsStateWithLifecycle().value) UpdateDialog(updates)
     var permitted by remember { mutableStateOf(hasVideoPermission(context)) }
     var partialOnly by remember { mutableStateOf(hasPartialAccessOnly(context)) }
 

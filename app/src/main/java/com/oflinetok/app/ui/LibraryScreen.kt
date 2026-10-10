@@ -15,6 +15,7 @@ import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SettingsBackupRestore
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -39,6 +40,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 
 private data class LibraryTab(val title: String, val icon: ImageVector, val tint: Color)
 
@@ -56,6 +58,8 @@ fun LibraryScreen(vm: AppViewModel, partialOnly: Boolean, onManageAccess: () -> 
     val loading by vm.loading.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var showBackup by remember { mutableStateOf(false) }
+    var showAbout by remember { mutableStateOf(false) }
+    val updates: UpdateViewModel = viewModel()
     val restore = rememberRestoreLauncher(vm)
 
     val favorites = videos.filter { meta[it.id]?.favorite == true }
@@ -72,8 +76,13 @@ fun LibraryScreen(vm: AppViewModel, partialOnly: Boolean, onManageAccess: () -> 
             .statusBarsPadding(),
     ) {
         Box(Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
-            IconButton(onClick = { showBackup = true }, modifier = Modifier.align(Alignment.CenterStart)) {
-                Icon(Icons.Filled.SettingsBackupRestore, "Tag backup")
+            Row(Modifier.align(Alignment.CenterStart)) {
+                IconButton(onClick = { showBackup = true }) {
+                    Icon(Icons.Filled.SettingsBackupRestore, "Tag backup")
+                }
+                IconButton(onClick = { showAbout = true }) {
+                    Icon(Icons.Outlined.Info, "About and updates")
+                }
             }
             Text(
                 "My videos",
@@ -163,6 +172,9 @@ fun LibraryScreen(vm: AppViewModel, partialOnly: Boolean, onManageAccess: () -> 
 
     if (showBackup) {
         BackupDialog(vm = vm, onRestore = restore, onDismiss = { showBackup = false })
+    }
+    if (showAbout) {
+        AboutDialog(updates = updates, onDismiss = { showAbout = false })
     }
 }
 
