@@ -1,6 +1,7 @@
 package com.oflinetok.app.ui
 
 import android.app.Application
+import android.content.Context
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
@@ -18,6 +19,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -30,11 +32,26 @@ data class FeedRequest(val title: String, val items: List<VideoItem>, val startI
 
 data class TagCount(val tag: String, val count: Int)
 
+data class FolderCount(val folder: String, val count: Int)
+
+/**
+ * What the Home feed shows when its filter tab is active. Within a group any match counts
+ * (#cats or #dogs); when both groups are set a video must match each (#cats from Camera).
+ */
+data class FeedFilter(val tags: Set<String> = emptySet(), val folders: Set<String> = emptySet()) {
+    val isEmpty: Boolean get() = tags.isEmpty() && folders.isEmpty()
+
+    fun matches(video: VideoItem, meta: VideoMeta?): Boolean =
+        (tags.isEmpty() || meta?.tags.orEmpty().any { it in tags }) &&
+            (folders.isEmpty() || video.folder in folders)
+}
+
 class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     private val repository = VideoRepository(app)
     private val metaStore = MetaStore(app)
     private val saveLock = Mutex()
+    private val prefs = app.getSharedPreferences("feed", Context.MODE_PRIVATE)
 
     private val _videos = MutableStateFlow<List<VideoItem>>(emptyList())
     val videos: StateFlow<List<VideoItem>> = _videos.asStateFlow()
@@ -59,6 +76,29 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var feedVersion by mutableIntStateOf(0)
         private set
 
+    /** The saved Home filter; kept even while the "For You" tab is showing. */
+    private val _feedFilter = MutableStateFlow(
+        FeedFilter(
+            tags = prefs.getStringSet("tags", null).orEmpty().toSet(),
+            folders = prefs.getStringSet("folders", null).orEmpty().toSet(),
+        ),
+    )
+    val feedFilter: StateFlow<FeedFilter> = _feedFilter.asStateFlow()
+
+    /** True when Home shows the filtered feed instead of all videos. */
+    private val _filterActive = MutableStateFlow(
+        prefs.getBoolean("active", false) && !_feedFilter.value.isEmpty,
+    )
+    val filterActive: StateFlow<Boolean> = _filterActive.asStateFlow()
+
+    /** Every gallery folder with its number of videos, largest first. */
+    val allFolders: StateFlow<List<FolderCount>> = _videos.map { videos ->
+        videos.mapNotNull { it.folder }
+            .groupingBy { it }.eachCount()
+            .map { FolderCount(it.key, it.value) }
+            .sortedWith(compareByDescending<FolderCount> { it.count }.thenBy { it.folder.lowercase() })
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
     /** Every tag used on a video that still exists, most used first. */
     val allTags: StateFlow<List<TagCount>> = combine(_videos, _meta) { videos, meta ->
         videos.flatMap { meta[it.id]?.tags.orEmpty() }
@@ -67,16 +107,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             .sortedWith(compareByDescending<TagCount> { it.count }.thenBy { it.tag })
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    init {
-        viewModelScope.launch {
-            _meta.value = withContext(Dispatchers.IO) { metaStore.load() }
-        }
+    private val metaLoad = viewModelScope.launch {
+        _meta.value = withContext(Dispatchers.IO) { metaStore.load() }
     }
 
     fun load() {
         if (_loading.value) return
         viewModelScope.launch {
             _loading.value = true
+            metaLoad.join() // A tag-filtered feed needs the tags before it can shuffle.
             val list = withContext(Dispatchers.IO) {
                 runCatching { repository.loadVideos() }.getOrDefault(emptyList())
             }
@@ -88,16 +127,45 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** The videos the Home feed draws from right now. */
+    private fun feedSource(): List<VideoItem> {
+        if (!_filterActive.value) return _videos.value
+        val filter = _feedFilter.value
+        val meta = _meta.value
+        return _videos.value.filter { filter.matches(it, meta[it.id]) }
+    }
+
+    /** Switches Home between "For You" (all videos) and the saved filter. */
+    fun setFilterActive(active: Boolean) {
+        val value = active && !_feedFilter.value.isEmpty
+        if (value == _filterActive.value) return
+        _filterActive.value = value
+        prefs.edit().putBoolean("active", value).apply()
+        reshuffle()
+    }
+
+    /** Saves a new filter and shows it; an empty filter falls back to "For You". */
+    fun applyFeedFilter(filter: FeedFilter) {
+        _feedFilter.value = filter
+        _filterActive.value = !filter.isEmpty
+        prefs.edit()
+            .putStringSet("tags", filter.tags)
+            .putStringSet("folders", filter.folders)
+            .putBoolean("active", !filter.isEmpty)
+            .apply()
+        reshuffle()
+    }
+
     fun reshuffle() {
         mainFeed.clear()
-        mainFeed.addAll(_videos.value.shuffled())
+        mainFeed.addAll(feedSource().shuffled())
         mainFeedPage = 0
         feedVersion++
     }
 
     /** Appends another random round of videos when the user nears the end of the feed. */
     fun extendMainFeed(page: Int) {
-        val all = _videos.value
+        val all = feedSource()
         if (all.isEmpty() || page < mainFeed.size - 3) return
         var next = all.shuffled()
         // Avoid showing the same video twice in a row across rounds.
@@ -132,11 +200,30 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         persist()
+        _feedFilter.value.let { f ->
+            if (from in f.tags) applyFeedFilterKeepingTab(f.copy(tags = f.tags - from + to))
+        }
     }
 
     fun deleteTag(tag: String) {
         _meta.update { all -> all.mapValues { (_, m) -> m.copy(tags = m.tags - tag) } }
         persist()
+        _feedFilter.value.let { f ->
+            if (tag in f.tags) applyFeedFilterKeepingTab(f.copy(tags = f.tags - tag))
+        }
+    }
+
+    /** Updates the saved filter after a tag rename/delete without switching tabs. */
+    private fun applyFeedFilterKeepingTab(filter: FeedFilter) {
+        if (_filterActive.value) {
+            applyFeedFilter(filter)
+            return
+        }
+        _feedFilter.value = filter
+        prefs.edit()
+            .putStringSet("tags", filter.tags)
+            .putStringSet("folders", filter.folders)
+            .apply()
     }
 
     fun openFeed(title: String, items: List<VideoItem>, startIndex: Int) {

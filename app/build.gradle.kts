@@ -12,8 +12,22 @@ android {
         applicationId = "com.oflinetok.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
+    }
+
+    // CI passes the permanent release key through these env vars (see .github/workflows/build.yml),
+    // so every published APK installs as an update over the previous one.
+    val keystorePath = System.getenv("SIGNING_KEYSTORE")
+    signingConfigs {
+        if (keystorePath != null) {
+            create("release") {
+                storeFile = file(keystorePath)
+                storePassword = System.getenv("SIGNING_PASSWORD")
+                keyAlias = "oflinetok"
+                keyPassword = System.getenv("SIGNING_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
@@ -21,8 +35,8 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            // Signed with the debug key so the release APK is installable without a keystore.
-            signingConfig = signingConfigs.getByName("debug")
+            // Falls back to the debug key for local builds without the release keystore.
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
 

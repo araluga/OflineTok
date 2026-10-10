@@ -20,10 +20,12 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.PlayArrow
@@ -91,11 +93,33 @@ private val overlayText = TextStyle(
     shadow = Shadow(Color.Black.copy(alpha = 0.6f), Offset(0f, 2f), 6f),
 )
 
-/** The endless, shuffled "For You" feed. */
+/** The endless, shuffled Home feed: all videos ("For You") or the saved tag/folder filter. */
 @Composable
 fun HomeFeed(vm: AppViewModel, active: Boolean) {
     val loaded by vm.loaded.collectAsStateWithLifecycle()
     val videos by vm.videos.collectAsStateWithLifecycle()
+    val meta by vm.meta.collectAsStateWithLifecycle()
+    val filter by vm.feedFilter.collectAsStateWithLifecycle()
+    val filterActive by vm.filterActive.collectAsStateWithLifecycle()
+    val allTags by vm.allTags.collectAsStateWithLifecycle()
+    val allFolders by vm.allFolders.collectAsStateWithLifecycle()
+    var picking by remember { mutableStateOf(false) }
+
+    val topBar: @Composable BoxScope.() -> Unit = {
+        HomeTabs(
+            filter = filter,
+            filterActive = filterActive,
+            onForYou = { if (filterActive) vm.setFilterActive(false) else vm.reshuffle() },
+            onFilterTab = {
+                // First tap switches to the saved filter; tapping it again (or with none saved) edits it.
+                if (filterActive || filter.isEmpty) picking = true else vm.setFilterActive(true)
+            },
+            modifier = Modifier.align(Alignment.Center),
+        )
+        IconButton(onClick = vm::reshuffle, modifier = Modifier.align(Alignment.CenterEnd)) {
+            Icon(Icons.Filled.Shuffle, "Shuffle", tint = Color.White)
+        }
+    }
 
     when {
         !loaded -> Box(Modifier.fillMaxSize(), Alignment.Center) { CircularProgressIndicator() }
@@ -103,27 +127,100 @@ fun HomeFeed(vm: AppViewModel, active: Boolean) {
             "No videos found",
             "Record or download some videos, then come back. They'll show up here automatically.",
         )
+        vm.mainFeed.isEmpty() -> Box(Modifier.fillMaxSize()) {
+            // Only reachable when the filter matches nothing, e.g. its tags were removed from every video.
+            EmptyMessage("Nothing to show", "No videos match ${filter.label()}. Tap it above to change the filter.")
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .height(52.dp)
+                    .padding(horizontal = 4.dp),
+                content = topBar,
+            )
+        }
         else -> key(vm.feedVersion) {
             VideoFeed(
                 vm = vm,
                 items = vm.mainFeed,
                 initialPage = vm.mainFeedPage.coerceAtMost(vm.mainFeed.lastIndex),
-                active = active,
+                active = active && !picking,
                 onPageSettled = { page ->
                     vm.mainFeedPage = page
                     vm.extendMainFeed(page)
                 },
-            ) {
-                Text(
-                    "For You",
-                    style = overlayText.copy(fontSize = 18.sp, fontWeight = FontWeight.Bold),
-                    modifier = Modifier.align(Alignment.Center),
-                )
-                IconButton(onClick = vm::reshuffle, modifier = Modifier.align(Alignment.CenterEnd)) {
-                    Icon(Icons.Filled.Shuffle, "Shuffle", tint = Color.White)
-                }
+                topBar = topBar,
+            )
+        }
+    }
+
+    if (picking) {
+        FeedFilterSheet(
+            current = filter,
+            allTags = allTags,
+            allFolders = allFolders,
+            videos = videos,
+            meta = meta,
+            onApply = {
+                vm.applyFeedFilter(it)
+                picking = false
+            },
+            onDismiss = { picking = false },
+        )
+    }
+}
+
+/** TikTok-style "For You | #cats" switch at the top of Home. */
+@Composable
+private fun HomeTabs(
+    filter: FeedFilter,
+    filterActive: Boolean,
+    onForYou: () -> Unit,
+    onFilterTab: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier.padding(horizontal = 56.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        HomeTab("For You", selected = !filterActive, onClick = onForYou)
+        Text("|", style = overlayText.copy(color = Color.White.copy(alpha = 0.4f), fontSize = 16.sp))
+        HomeTab(filter.label(), selected = filterActive, onClick = onFilterTab, dropdown = true)
+    }
+}
+
+@Composable
+private fun HomeTab(label: String, selected: Boolean, onClick: () -> Unit, dropdown: Boolean = false) {
+    Column(
+        Modifier
+            .clickable(onClick = onClick)
+            .padding(horizontal = 6.dp, vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        val color = if (selected) Color.White else Color.White.copy(alpha = 0.6f)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                label,
+                style = overlayText.copy(
+                    color = color,
+                    fontSize = 17.sp,
+                    fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold,
+                ),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.widthIn(max = 140.dp),
+            )
+            if (dropdown) {
+                Icon(Icons.Filled.ArrowDropDown, "Choose filter", tint = color, modifier = Modifier.size(20.dp))
             }
         }
+        Spacer(Modifier.height(3.dp))
+        Box(
+            Modifier
+                .size(width = 24.dp, height = 2.dp)
+                .background(if (selected) Color.White else Color.Transparent),
+        )
     }
 }
 
