@@ -23,6 +23,7 @@ import androidx.compose.material3.InputChipDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SuggestionChip
+import androidx.compose.material3.SuggestionChipDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -45,6 +46,7 @@ fun TagEditorDialog(
     onAdd: (String) -> Unit,
     onRemove: (String) -> Unit,
     onDismiss: () -> Unit,
+    suggested: List<String> = emptyList(),
 ) {
     var input by remember { mutableStateOf("") }
     val typed = normalizeTag(input)
@@ -57,7 +59,7 @@ fun TagEditorDialog(
 
     val suggestions = allTags
         .map { it.tag }
-        .filter { it !in meta.tags && (typed == null || it.contains(typed)) }
+        .filter { it !in meta.tags && it !in suggested && (typed == null || it.contains(typed)) }
         .take(30)
 
     AlertDialog(
@@ -112,6 +114,23 @@ fun TagEditorDialog(
                                         modifier = Modifier.height(InputChipDefaults.IconSize),
                                     )
                                 },
+                            )
+                        }
+                    }
+                }
+
+                if (suggested.isNotEmpty()) {
+                    Spacer(Modifier.height(16.dp))
+                    Text("✨ Suggested for this video", style = MaterialTheme.typography.labelLarge)
+                    Spacer(Modifier.height(4.dp))
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        suggested.forEach { tag ->
+                            SuggestionChip(
+                                onClick = { onAdd(tag) },
+                                label = { Text("+ #$tag") },
+                                colors = SuggestionChipDefaults.suggestionChipColors(
+                                    containerColor = TokCyan.copy(alpha = 0.18f),
+                                ),
                             )
                         }
                     }

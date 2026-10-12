@@ -90,6 +90,14 @@ fun OflineTokRoot(vm: AppViewModel = viewModel(), updates: UpdateViewModel = vie
         return
     }
 
+    // Analyze videos for smart features in the background while the app is open.
+    val ai: AiViewModel = viewModel()
+    val aiReady = ai.state.collectAsStateWithLifecycle().value is AiState.Ready
+    val visibleVideos by vm.visibleVideos.collectAsStateWithLifecycle()
+    val tagNames = vm.allTags.collectAsStateWithLifecycle().value.map { it.tag }
+    LaunchedEffect(aiReady, visibleVideos) { if (aiReady) ai.index(visibleVideos) }
+    LaunchedEffect(aiReady, tagNames) { if (aiReady) ai.prepareTags(tagNames) }
+
     val openedFeed by vm.openedFeed.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableStateOf(Tab.Home) }
 

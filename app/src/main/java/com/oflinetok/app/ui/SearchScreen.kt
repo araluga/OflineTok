@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -56,9 +57,33 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.oflinetok.app.data.normalizeTag
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SearchScreen(vm: AppViewModel) {
+    var smart by rememberSaveable { mutableStateOf(false) }
+    Column(
+        Modifier
+            .fillMaxSize()
+            .statusBarsPadding(),
+    ) {
+        Row(
+            Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            FilterChip(selected = !smart, onClick = { smart = false }, label = { Text("# Tags") })
+            FilterChip(
+                selected = smart,
+                onClick = { smart = true },
+                label = { Text("Smart search") },
+                leadingIcon = { Icon(Icons.Filled.AutoAwesome, null, Modifier.size(18.dp), tint = TokCyan) },
+            )
+        }
+        if (smart) SmartSearch(vm) else TagSearch(vm)
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun TagSearch(vm: AppViewModel) {
     val videos by vm.visibleVideos.collectAsStateWithLifecycle()
     val meta by vm.meta.collectAsStateWithLifecycle()
     val allTags by vm.allTags.collectAsStateWithLifecycle()
@@ -89,11 +114,7 @@ fun SearchScreen(vm: AppViewModel) {
         else -> "#$q"
     }
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .statusBarsPadding(),
-    ) {
+    Column(Modifier.fillMaxSize()) {
         TextField(
             value = query,
             onValueChange = { query = it },
@@ -125,6 +146,8 @@ fun SearchScreen(vm: AppViewModel) {
             }
             return@Column
         }
+
+        if (results == null) SuggestionsBanner(vm)
 
         Row(
             Modifier

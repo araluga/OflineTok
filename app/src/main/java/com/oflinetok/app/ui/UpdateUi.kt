@@ -171,6 +171,8 @@ fun AboutDialog(updates: UpdateViewModel, onMissingVideos: () -> Unit, onDismiss
                     )
                 }) { Text("View on GitHub") }
                 TextButton(onClick = onMissingVideos) { Text("Missing videos?") }
+                Spacer(Modifier.height(8.dp))
+                SmartFeaturesRow()
             }
         },
         confirmButton = {

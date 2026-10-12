@@ -42,6 +42,8 @@ data class FeedRequest(
     val items: List<VideoItem>,
     val startIndex: Int,
     val showHidden: Boolean = false,
+    /** Show tap-to-add AI tag suggestions on each video. */
+    val suggestions: Boolean = false,
 )
 
 /** An extra copy of a video that is hidden because [original] is already shown. */
@@ -306,9 +308,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             .apply()
     }
 
-    fun openFeed(title: String, items: List<VideoItem>, startIndex: Int, showHidden: Boolean = false) {
+    fun openFeed(
+        title: String,
+        items: List<VideoItem>,
+        startIndex: Int,
+        showHidden: Boolean = false,
+        suggestions: Boolean = false,
+    ) {
         if (items.isEmpty()) return
-        _openedFeed.value = FeedRequest(title, items, startIndex.coerceIn(items.indices), showHidden)
+        _openedFeed.value = FeedRequest(title, items, startIndex.coerceIn(items.indices), showHidden, suggestions)
     }
 
     fun closeFeed() {

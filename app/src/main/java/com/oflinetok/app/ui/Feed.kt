@@ -85,6 +85,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.lifecycle.compose.currentStateAsState
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
@@ -255,6 +257,7 @@ fun OpenedFeed(vm: AppViewModel, request: FeedRequest) {
                 initialPage = request.startIndex,
                 active = true,
                 showHidden = request.showHidden,
+                showSuggestions = request.suggestions,
                 onPageSettled = { _, _ -> },
             ) {
                 IconButton(onClick = vm::closeFeed, modifier = Modifier.align(Alignment.CenterStart)) {
@@ -282,13 +285,23 @@ private fun VideoFeed(
     active: Boolean,
     onPageSettled: (page: Int, count: Int) -> Unit,
     showHidden: Boolean = false,
+    showSuggestions: Boolean = false,
     topBar: @Composable BoxScope.() -> Unit,
 ) {
     val context = LocalContext.current
+    val ai: AiViewModel = viewModel()
+    val aiState by ai.state.collectAsStateWithLifecycle()
+    val aiVersion by ai.version.collectAsStateWithLifecycle()
+    val visibleVideos by vm.visibleVideos.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val meta by vm.meta.collectAsStateWithLifecycle()
     val allTags by vm.allTags.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
+    fun suggestionsFor(item: VideoItem, limit: Int): List<String> {
+        if (aiState !is AiState.Ready) return emptyList()
+        aiVersion // Re-read when new analysis results arrive.
+        return ai.suggestTags(item.id, meta, visibleVideos, limit)
+    }
 
     // Blocked videos drop out at once (and come back in place on Undo). items.size is a key so the
     // growing Home feed is re-read when new rounds are appended.
@@ -368,6 +381,8 @@ private fun VideoFeed(
                 onDoubleTapLike = { vm.like(item.id) },
                 onFavorite = { vm.toggleFavorite(item.id) },
                 onEditTags = { tagEditorFor = item },
+                suggestions = if (showSuggestions) suggestionsFor(item, 4) else emptyList(),
+                onAddSuggestion = { tag -> vm.addTag(item.id, tag) },
                 onShare = { shareVideo(context, item) },
                 onToggleBlocked = {
                     val nowBlocked = !(meta[item.id]?.blocked ?: false)
@@ -414,6 +429,7 @@ private fun VideoFeed(
             onAdd = { vm.addTag(item.id, it) },
             onRemove = { vm.removeTag(item.id, it) },
             onDismiss = { tagEditorFor = null },
+            suggested = suggestionsFor(item, 8),
         )
     }
 }
@@ -431,6 +447,8 @@ private fun VideoPage(
     onDoubleTapLike: () -> Unit,
     onFavorite: () -> Unit,
     onEditTags: () -> Unit,
+    suggestions: List<String>,
+    onAddSuggestion: (String) -> Unit,
     onShare: () -> Unit,
     onToggleBlocked: () -> Unit,
     onTagClick: (String) -> Unit,
@@ -528,6 +546,22 @@ private fun VideoPage(
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
+            if (suggestions.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    suggestions.forEach { tag ->
+                        Text(
+                            "✨ #$tag",
+                            style = overlayText.copy(fontWeight = FontWeight.SemiBold, fontSize = 13.sp),
+                            maxLines = 1,
+                            modifier = Modifier
+                                .background(TokCyan.copy(alpha = 0.35f), RoundedCornerShape(50))
+                                .clickable { onAddSuggestion(tag) }
+                                .padding(horizontal = 10.dp, vertical = 5.dp),
+                        )
+                    }
+                }
+            }
             if (meta.tags.isNotEmpty()) {
                 Spacer(Modifier.height(6.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

@@ -1,1 +1,2 @@
-# Default rules from the Android Gradle plugin are sufficient for this app.
+# ONNX Runtime's native code calls into its Java classes by name; keep them as they are.
+-keep class ai.onnxruntime.** { *; }

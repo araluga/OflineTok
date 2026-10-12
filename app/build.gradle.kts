@@ -12,8 +12,11 @@ android {
         applicationId = "com.oflinetok.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 7
-        versionName = "1.6"
+        versionCode = 8
+        versionName = "1.7"
+
+        // ONNX Runtime ships native code per CPU type; phones only need the ARM ones.
+        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
 
     // CI passes the permanent release key through these env vars (see .github/workflows/build.yml),
@@ -48,6 +51,12 @@ android {
     buildFeatures {
         compose = true
     }
+
+    // Compress native libraries inside the APK: ONNX Runtime is ~50 MB raw, far less zipped,
+    // which keeps update downloads small. Android unpacks them once at install.
+    packaging {
+        jniLibs { useLegacyPackaging = true }
+    }
 }
 
 kotlin {
@@ -73,4 +82,16 @@ dependencies {
 
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("io.coil-kt:coil-video:2.7.0")
+
+    // On-device CLIP model for tag suggestions and smart search.
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.28.0")
+
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303") // Real org.json; Android's is a stub in unit tests.
+}
+
+tasks.withType<Test>().configureEach {
+    systemProperty("clipDir", providers.gradleProperty("clipDir").getOrElse(""))
+    systemProperty("cocoDir", providers.gradleProperty("cocoDir").getOrElse(""))
+    systemProperty("clipOut", layout.buildDirectory.dir("clip-test").get().asFile.path)
 }
