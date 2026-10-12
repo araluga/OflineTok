@@ -33,6 +33,7 @@ class MetaStore(context: Context) {
                             tags = tags,
                             liked = obj.optBoolean("liked"),
                             favorite = obj.optBoolean("favorite"),
+                            blocked = obj.optBoolean("blocked"),
                         ),
                     )
                 }
@@ -51,7 +52,8 @@ class MetaStore(context: Context) {
                 JSONObject()
                     .put("tags", JSONArray(m.tags.sorted()))
                     .put("liked", m.liked)
-                    .put("favorite", m.favorite),
+                    .put("favorite", m.favorite)
+                    .put("blocked", m.blocked),
             )
         }
         val json = JSONObject().put("version", 1).put("videos", videos).toString()

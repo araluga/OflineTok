@@ -59,7 +59,7 @@ import com.oflinetok.app.data.normalizeTag
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SearchScreen(vm: AppViewModel) {
-    val videos by vm.videos.collectAsStateWithLifecycle()
+    val videos by vm.visibleVideos.collectAsStateWithLifecycle()
     val meta by vm.meta.collectAsStateWithLifecycle()
     val allTags by vm.allTags.collectAsStateWithLifecycle()
 

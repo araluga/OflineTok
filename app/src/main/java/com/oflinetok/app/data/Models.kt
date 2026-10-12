@@ -20,8 +20,10 @@ data class VideoMeta(
     val tags: Set<String> = emptySet(),
     val liked: Boolean = false,
     val favorite: Boolean = false,
+    /** "Don't show this video again": hidden everywhere except Me → Hidden. */
+    val blocked: Boolean = false,
 ) {
-    val isEmpty: Boolean get() = tags.isEmpty() && !liked && !favorite
+    val isEmpty: Boolean get() = tags.isEmpty() && !liked && !favorite && !blocked
 }
 
 /** Lowercase, no leading '#', single spaces. Returns null for blank input. */

@@ -47,7 +47,8 @@ class BackupManager(private val context: Context) {
                     .put("size", video?.size ?: 0L)
                     .put("tags", JSONArray(m.tags.sorted()))
                     .put("liked", m.liked)
-                    .put("favorite", m.favorite),
+                    .put("favorite", m.favorite)
+                    .put("blocked", m.blocked),
             )
         }
         val json = JSONObject()
@@ -113,6 +114,7 @@ class BackupManager(private val context: Context) {
                     tags = (0 until tags.length()).mapNotNull { normalizeTag(tags.getString(it)) }.toSet(),
                     liked = o.optBoolean("liked"),
                     favorite = o.optBoolean("favorite"),
+                    blocked = o.optBoolean("blocked"),
                 ),
             )
         }
@@ -150,9 +152,10 @@ class BackupManager(private val context: Context) {
     }
 }
 
-/** Union of tags; liked/favorite if either side is. */
+/** Union of tags; liked/favorite/blocked if either side is. */
 fun VideoMeta.mergedWith(other: VideoMeta) = VideoMeta(
     tags = tags + other.tags,
     liked = liked || other.liked,
     favorite = favorite || other.favorite,
+    blocked = blocked || other.blocked,
 )

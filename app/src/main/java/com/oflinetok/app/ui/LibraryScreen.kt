@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SettingsBackupRestore
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -50,7 +51,10 @@ private val libraryTabs = listOf(
     LibraryTab("Favorites", Icons.Filled.Star, TokGold),
     LibraryTab("Liked", Icons.Filled.Favorite, TokPink),
     LibraryTab("All", Icons.Filled.Apps, Color.White),
+    LibraryTab("Hidden", Icons.Filled.VisibilityOff, Color.White),
 )
+
+private const val HIDDEN_TAB = 3
 
 @Composable
 fun LibraryScreen(
@@ -63,7 +67,7 @@ fun LibraryScreen(
     val uiPrefs = remember { context.getSharedPreferences("ui", Context.MODE_PRIVATE) }
     var hideScanCard by remember { mutableStateOf(uiPrefs.getBoolean("hideScanCard", false)) }
     var showHelp by remember { mutableStateOf(false) }
-    val videos by vm.videos.collectAsStateWithLifecycle()
+    val videos by vm.visibleVideos.collectAsStateWithLifecycle()
     val meta by vm.meta.collectAsStateWithLifecycle()
     val allTags by vm.allTags.collectAsStateWithLifecycle()
     val loading by vm.loading.collectAsStateWithLifecycle()
@@ -178,7 +182,9 @@ fun LibraryScreen(
             }
         }
 
-        if (shown.isEmpty()) {
+        if (tab == HIDDEN_TAB) {
+            HiddenSection(vm)
+        } else if (shown.isEmpty()) {
             when (tab) {
                 0 -> EmptyMessage("No favorites yet", "Tap the star on a video to save it here.")
                 1 -> EmptyMessage("No liked videos yet", "Tap the heart, or double-tap a video, to like it.")

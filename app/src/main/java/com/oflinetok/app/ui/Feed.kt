@@ -34,6 +34,16 @@ import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.Tag
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -99,6 +109,7 @@ private val overlayText = TextStyle(
 fun HomeFeed(vm: AppViewModel, active: Boolean) {
     val loaded by vm.loaded.collectAsStateWithLifecycle()
     val videos by vm.videos.collectAsStateWithLifecycle()
+    val visibleVideos by vm.visibleVideos.collectAsStateWithLifecycle()
     val meta by vm.meta.collectAsStateWithLifecycle()
     val filter by vm.feedFilter.collectAsStateWithLifecycle()
     val filterActive by vm.filterActive.collectAsStateWithLifecycle()
@@ -129,8 +140,12 @@ fun HomeFeed(vm: AppViewModel, active: Boolean) {
             "Record or download some videos, then come back. They'll show up here automatically.",
         )
         vm.mainFeed.isEmpty() -> Box(Modifier.fillMaxSize()) {
-            // Only reachable when the filter matches nothing, e.g. its tags were removed from every video.
-            EmptyMessage("Nothing to show", "No videos match ${filter.label()}. Tap it above to change the filter.")
+            // The filter matches nothing (e.g. its tags were removed), or every video is hidden.
+            EmptyMessage(
+                "Nothing to show",
+                if (filterActive) "No videos match ${filter.label()}. Tap it above to change the filter."
+                else "All your videos are hidden. Find them in Me → Hidden.",
+            )
             Box(
                 Modifier
                     .fillMaxWidth()
@@ -146,9 +161,9 @@ fun HomeFeed(vm: AppViewModel, active: Boolean) {
                 items = vm.mainFeed,
                 initialPage = vm.mainFeedPage.coerceAtMost(vm.mainFeed.lastIndex),
                 active = active && !picking,
-                onPageSettled = { page ->
+                onPageSettled = { page, count ->
                     vm.mainFeedPage = page
-                    vm.extendMainFeed(page)
+                    vm.extendMainFeed(page, count)
                 },
                 topBar = topBar,
             )
@@ -160,7 +175,7 @@ fun HomeFeed(vm: AppViewModel, active: Boolean) {
             current = filter,
             allTags = allTags,
             allFolders = allFolders,
-            videos = videos,
+            videos = visibleVideos,
             meta = meta,
             onApply = {
                 vm.applyFeedFilter(it)
@@ -239,7 +254,8 @@ fun OpenedFeed(vm: AppViewModel, request: FeedRequest) {
                 items = request.items,
                 initialPage = request.startIndex,
                 active = true,
-                onPageSettled = {},
+                showHidden = request.showHidden,
+                onPageSettled = { _, _ -> },
             ) {
                 IconButton(onClick = vm::closeFeed, modifier = Modifier.align(Alignment.CenterStart)) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White)
@@ -264,12 +280,22 @@ private fun VideoFeed(
     items: List<VideoItem>,
     initialPage: Int,
     active: Boolean,
-    onPageSettled: (Int) -> Unit,
+    onPageSettled: (page: Int, count: Int) -> Unit,
+    showHidden: Boolean = false,
     topBar: @Composable BoxScope.() -> Unit,
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val meta by vm.meta.collectAsStateWithLifecycle()
     val allTags by vm.allTags.collectAsStateWithLifecycle()
+    val snackbar = remember { SnackbarHostState() }
+
+    // Blocked videos drop out at once (and come back in place on Undo). items.size is a key so the
+    // growing Home feed is re-read when new rounds are appended.
+    val shown = remember(items, items.size, meta, showHidden) {
+        if (showHidden) items.toList() else items.filter { meta[it.id]?.blocked != true }
+    }
+    val shownCount by rememberUpdatedState(shown.size)
 
     val player = remember {
         ExoPlayer.Builder(context).build().apply { repeatMode = Player.REPEAT_MODE_ONE }
@@ -294,14 +320,14 @@ private fun VideoFeed(
         onDispose { player.removeListener(listener) }
     }
 
-    val pagerState = rememberPagerState(initialPage.coerceAtLeast(0)) { items.size }
+    val pagerState = rememberPagerState(initialPage.coerceAtLeast(0)) { shown.size }
     val settledPage = pagerState.settledPage
-    val current = items.getOrNull(settledPage)
+    val current = shown.getOrNull(settledPage)
     var userPaused by remember { mutableStateOf(false) }
     var tagEditorFor by remember { mutableStateOf<VideoItem?>(null) }
 
     LaunchedEffect(pagerState) {
-        snapshotFlow { pagerState.settledPage }.collect(onPageSettled)
+        snapshotFlow { pagerState.settledPage }.collect { onPageSettled(it, shownCount) }
     }
 
     LaunchedEffect(settledPage, current?.id) {
@@ -325,10 +351,10 @@ private fun VideoFeed(
         VerticalPager(
             state = pagerState,
             beyondViewportPageCount = 1,
-            key = { page -> "$page-${items.getOrNull(page)?.id}" },
+            key = { page -> "$page-${shown.getOrNull(page)?.id}" },
             modifier = Modifier.fillMaxSize(),
         ) { page ->
-            val item = items.getOrNull(page) ?: return@VerticalPager
+            val item = shown.getOrNull(page) ?: return@VerticalPager
             val isCurrent = page == settledPage
             VideoPage(
                 item = item,
@@ -343,8 +369,21 @@ private fun VideoFeed(
                 onFavorite = { vm.toggleFavorite(item.id) },
                 onEditTags = { tagEditorFor = item },
                 onShare = { shareVideo(context, item) },
+                onToggleBlocked = {
+                    val nowBlocked = !(meta[item.id]?.blocked ?: false)
+                    vm.setBlocked(item.id, nowBlocked)
+                    scope.launch {
+                        snackbar.currentSnackbarData?.dismiss()
+                        val result = snackbar.showSnackbar(
+                            message = if (nowBlocked) "Video hidden. Find it in Me → Hidden." else "Video will show again.",
+                            actionLabel = "Undo",
+                            duration = SnackbarDuration.Short,
+                        )
+                        if (result == SnackbarResult.ActionPerformed) vm.setBlocked(item.id, !nowBlocked)
+                    }
+                },
                 onTagClick = { tag ->
-                    val tagged = vm.videos.value.filter { tag in vm.metaFor(it.id).tags }.shuffled()
+                    val tagged = vm.visibleVideos.value.filter { tag in vm.metaFor(it.id).tags }.shuffled()
                     vm.openFeed("#$tag", tagged, 0)
                 },
             )
@@ -358,6 +397,13 @@ private fun VideoFeed(
                 .height(52.dp)
                 .padding(horizontal = 4.dp),
             content = topBar,
+        )
+
+        SnackbarHost(
+            snackbar,
+            Modifier
+                .align(Alignment.BottomCenter)
+                .padding(start = 12.dp, end = 12.dp, bottom = 96.dp),
         )
     }
 
@@ -386,6 +432,7 @@ private fun VideoPage(
     onFavorite: () -> Unit,
     onEditTags: () -> Unit,
     onShare: () -> Unit,
+    onToggleBlocked: () -> Unit,
     onTagClick: (String) -> Unit,
 ) {
     var heartAt by remember { mutableStateOf(Offset.Zero) }
@@ -521,18 +568,42 @@ private fun VideoPage(
                 label = if (meta.tags.isEmpty()) "Tag" else "${meta.tags.size} tags",
                 onClick = onEditTags,
             )
-            SideAction(
-                icon = Icons.Filled.Share,
-                tint = Color.White,
-                label = "Share",
-                onClick = onShare,
-            )
+            MoreActions(blocked = meta.blocked, onShare = onShare, onToggleBlocked = onToggleBlocked)
         }
 
         if (player != null) {
             SeekBar(
                 player = player,
                 modifier = Modifier.align(Alignment.BottomCenter),
+            )
+        }
+    }
+}
+
+/** The ⋮ button: Share and "Don't show this video again". */
+@Composable
+private fun MoreActions(blocked: Boolean, onShare: () -> Unit, onToggleBlocked: () -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        SideAction(icon = Icons.Filled.MoreVert, tint = Color.White, label = "More", onClick = { open = true })
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { Text("Share") },
+                leadingIcon = { Icon(Icons.Filled.Share, null) },
+                onClick = {
+                    open = false
+                    onShare()
+                },
+            )
+            DropdownMenuItem(
+                text = { Text(if (blocked) "Show this video again" else "Don't show this video again") },
+                leadingIcon = {
+                    Icon(if (blocked) Icons.Filled.Visibility else Icons.Filled.VisibilityOff, null)
+                },
+                onClick = {
+                    open = false
+                    onToggleBlocked()
+                },
             )
         }
     }
