@@ -48,7 +48,8 @@ class BackupManager(private val context: Context) {
                     .put("tags", JSONArray(m.tags.sorted()))
                     .put("liked", m.liked)
                     .put("favorite", m.favorite)
-                    .put("blocked", m.blocked),
+                    .put("blocked", m.blocked)
+                    .put("rejectedAi", JSONArray(m.rejectedAi.sorted())),
             )
         }
         val json = JSONObject()
@@ -115,6 +116,9 @@ class BackupManager(private val context: Context) {
                     liked = o.optBoolean("liked"),
                     favorite = o.optBoolean("favorite"),
                     blocked = o.optBoolean("blocked"),
+                    rejectedAi = o.optJSONArray("rejectedAi").let { a ->
+                        if (a == null) emptySet() else (0 until a.length()).map { a.getString(it) }.toSet()
+                    },
                 ),
             )
         }
@@ -158,4 +162,5 @@ fun VideoMeta.mergedWith(other: VideoMeta) = VideoMeta(
     liked = liked || other.liked,
     favorite = favorite || other.favorite,
     blocked = blocked || other.blocked,
+    rejectedAi = rejectedAi + other.rejectedAi,
 )

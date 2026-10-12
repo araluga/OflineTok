@@ -23,7 +23,6 @@ import androidx.compose.material3.InputChipDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SuggestionChip
-import androidx.compose.material3.SuggestionChipDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -31,6 +30,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.layout.Row
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -46,8 +47,9 @@ fun TagEditorDialog(
     onAdd: (String) -> Unit,
     onRemove: (String) -> Unit,
     onDismiss: () -> Unit,
-    suggested: List<String> = emptyList(),
-    ideas: List<String> = emptyList(),
+    aiTags: List<String> = emptyList(),
+    onConfirmAi: (String) -> Unit = {},
+    onRejectAi: (String) -> Unit = {},
 ) {
     var input by remember { mutableStateOf("") }
     val typed = normalizeTag(input)
@@ -60,7 +62,7 @@ fun TagEditorDialog(
 
     val suggestions = allTags
         .map { it.tag }
-        .filter { it !in meta.tags && it !in suggested && it !in ideas && (typed == null || it.contains(typed)) }
+        .filter { it !in meta.tags && (typed == null || it.contains(typed)) }
         .take(30)
 
     AlertDialog(
@@ -120,36 +122,19 @@ fun TagEditorDialog(
                     }
                 }
 
-                if (suggested.isNotEmpty()) {
+                if (aiTags.isNotEmpty()) {
                     Spacer(Modifier.height(16.dp))
-                    Text("✨ Suggested for this video", style = MaterialTheme.typography.labelLarge)
-                    Spacer(Modifier.height(4.dp))
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        suggested.forEach { tag ->
-                            SuggestionChip(
-                                onClick = { onAdd(tag) },
-                                label = { Text("+ #$tag") },
-                                colors = SuggestionChipDefaults.suggestionChipColors(
-                                    containerColor = TokCyan.copy(alpha = 0.18f),
-                                ),
-                            )
-                        }
-                    }
-                }
-
-                if (ideas.isNotEmpty()) {
-                    Spacer(Modifier.height(16.dp))
-                    Text("\u2728 New tag ideas", style = MaterialTheme.typography.labelLarge)
-                    Spacer(Modifier.height(4.dp))
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        ideas.forEach { tag ->
-                            SuggestionChip(
-                                onClick = { onAdd(tag) },
-                                label = { Text("+ #$tag") },
-                                colors = SuggestionChipDefaults.suggestionChipColors(
-                                    containerColor = TokPink.copy(alpha = 0.18f),
-                                ),
-                            )
+                    Text("\u2728 AI tags on this video", style = MaterialTheme.typography.labelLarge)
+                    Text(
+                        "Added by the AI, kept apart from yours. Right makes it your tag; Wrong removes it and teaches the AI.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    aiTags.forEach { tag ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("\u2728 #$tag", color = TokCyan, modifier = Modifier.weight(1f))
+                            TextButton(onClick = { onConfirmAi(tag) }) { Text("Right") }
+                            TextButton(onClick = { onRejectAi(tag) }) { Text("Wrong") }
                         }
                     }
                 }

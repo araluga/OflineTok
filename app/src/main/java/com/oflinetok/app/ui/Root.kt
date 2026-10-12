@@ -97,6 +97,15 @@ fun OflineTokRoot(vm: AppViewModel = viewModel(), updates: UpdateViewModel = vie
     val tagNames = vm.allTags.collectAsStateWithLifecycle().value.map { it.tag }
     LaunchedEffect(aiReady, visibleVideos) { if (aiReady) ai.index(visibleVideos) }
     LaunchedEffect(aiReady, tagNames) { if (aiReady) ai.prepareTags(tagNames) }
+    val aiVersion by ai.version.collectAsStateWithLifecycle()
+    val tagSignature by vm.tagSignature.collectAsStateWithLifecycle()
+    val neverAi by vm.neverAiTags.collectAsStateWithLifecycle()
+    val visibleIds = remember(visibleVideos) { visibleVideos.map { it.id } }
+    LaunchedEffect(aiReady, aiVersion, tagSignature, visibleIds, neverAi) {
+        ai.retag(vm.meta.value, visibleVideos, neverAi)
+    }
+    val computedAiTags by ai.aiTags.collectAsStateWithLifecycle()
+    LaunchedEffect(computedAiTags) { vm.setAiTags(computedAiTags) }
 
     val openedFeed by vm.openedFeed.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableStateOf(Tab.Home) }

@@ -42,8 +42,6 @@ data class FeedRequest(
     val items: List<VideoItem>,
     val startIndex: Int,
     val showHidden: Boolean = false,
-    /** Show tap-to-add AI tag suggestions on each video. */
-    val suggestions: Boolean = false,
 )
 
 /** An extra copy of a video that is hidden because [original] is already shown. */
@@ -65,8 +63,9 @@ data class FolderCount(val folder: String, val count: Int)
 data class FeedFilter(val tags: Set<String> = emptySet(), val folders: Set<String> = emptySet()) {
     val isEmpty: Boolean get() = tags.isEmpty() && folders.isEmpty()
 
-    fun matches(video: VideoItem, meta: VideoMeta?): Boolean =
-        (tags.isEmpty() || meta?.tags.orEmpty().any { it in tags }) &&
+    /** [aiTags] are the AI's tags for this video; they count like the user's own. */
+    fun matches(video: VideoItem, meta: VideoMeta?, aiTags: List<String>? = null): Boolean =
+        (tags.isEmpty() || meta?.tags.orEmpty().any { it in tags } || aiTags.orEmpty().any { it in tags }) &&
             (folders.isEmpty() || video.folder in folders)
 }
 
@@ -163,6 +162,45 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             .sortedWith(compareByDescending<FolderCount> { it.count }.thenBy { it.folder.lowercase() })
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
+    /** The AI's tags per video, pushed in from [AiViewModel]. Kept apart from the user's tags. */
+    private val _aiTags = MutableStateFlow<Map<Long, List<String>>>(emptyMap())
+    val aiTags: StateFlow<Map<Long, List<String>>> = _aiTags.asStateFlow()
+
+    fun setAiTags(tags: Map<Long, List<String>>) {
+        _aiTags.value = tags
+    }
+
+    /** AI tags the user never wants to see. */
+    private val _neverAi = MutableStateFlow(prefs.getStringSet("neverAi", null).orEmpty().toSet())
+    val neverAiTags: StateFlow<Set<String>> = _neverAi.asStateFlow()
+
+    /** Changes only when tags or AI rejections change (not on likes), to know when to re-tag. */
+    val tagSignature: StateFlow<Int> = _meta.map { all ->
+        all.entries.fold(0) { acc, (id, m) -> acc + (id.hashCode() * 31 + m.tags.hashCode()) * 31 + m.rejectedAi.hashCode() }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, 0)
+
+    /** Every AI tag on a visible video, most used first. */
+    val allAiTags: StateFlow<List<TagCount>> = combine(visibleVideos, _aiTags) { videos, ai ->
+        videos.flatMap { ai[it.id].orEmpty() }
+            .groupingBy { it }.eachCount()
+            .map { TagCount(it.key, it.value) }
+            .sortedWith(compareByDescending<TagCount> { it.count }.thenBy { it.tag })
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /** The user's tags plus the AI's, for searching. */
+    fun allTagsOf(id: Long): Set<String> = metaFor(id).tags + _aiTags.value[id].orEmpty()
+
+    /** "Right": the AI tag becomes one of the user's tags. */
+    fun confirmAiTag(id: Long, tag: String) = edit(id) { it.copy(tags = it.tags + tag, rejectedAi = it.rejectedAi - tag) }
+
+    /** "Wrong": hide it on this video; the AI also stops giving it to near-identical videos. */
+    fun rejectAiTag(id: Long, tag: String) = edit(id) { it.copy(rejectedAi = it.rejectedAi + tag) }
+
+    fun setNeverAiTag(tag: String, never: Boolean) {
+        _neverAi.update { if (never) it + tag else it - tag }
+        prefs.edit().putStringSet("neverAi", _neverAi.value).apply()
+    }
+
     /** Every tag used on a video that still exists, most used first. */
     val allTags: StateFlow<List<TagCount>> = combine(visibleVideos, _meta) { videos, meta ->
         videos.flatMap { meta[it.id]?.tags.orEmpty() }
@@ -248,7 +286,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (!_filterActive.value) return all
         val filter = _feedFilter.value
         val meta = _meta.value
-        return all.filter { filter.matches(it, meta[it.id]) }
+        val ai = _aiTags.value
+        return all.filter { filter.matches(it, meta[it.id], ai[it.id]) }
     }
 
     fun setHideDuplicates(hide: Boolean) {
@@ -359,10 +398,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         items: List<VideoItem>,
         startIndex: Int,
         showHidden: Boolean = false,
-        suggestions: Boolean = false,
     ) {
         if (items.isEmpty()) return
-        _openedFeed.value = FeedRequest(title, items, startIndex.coerceIn(items.indices), showHidden, suggestions)
+        _openedFeed.value = FeedRequest(title, items, startIndex.coerceIn(items.indices), showHidden)
     }
 
     fun closeFeed() {

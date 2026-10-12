@@ -198,8 +198,9 @@ private fun SmartSetup(state: AiState, ai: AiViewModel) {
         Spacer(Modifier.height(12.dp))
         Text(
             "• Find videos by describing them: \"cat on a sofa\", \"snowy mountains\".\n" +
-                "• Get tag suggestions: OflineTok learns from the videos you've tagged and suggests " +
-                "the same tags for similar videos, or comes up with new tags when none fit.\n\n" +
+                "• AI tags: the AI tags your videos by itself, in a separate ✨ list next to your " +
+                "own tags. It learns from the videos you've tagged, and comes up with new tags when none fit. " +
+                "Tell it Right or Wrong and it learns.\n\n" +
                 "This needs a one-time download of an AI model ($MODEL_MB MB, Wi-Fi recommended). " +
                 "After that everything runs on your phone. Your videos are never uploaded.",
             style = MaterialTheme.typography.bodyMedium,
@@ -228,29 +229,23 @@ private fun SmartSetup(state: AiState, ai: AiViewModel) {
 }
 
 /**
- * Banner on the Search screen: "Tag suggestions for 12 untagged videos". Opens a feed of
- * those videos with tap-to-add suggestion chips.
+ * Banner on the Search screen: "AI tagged 12 videos you haven't tagged". Opens them in a feed,
+ * where tapping a \u2728 tag lets the user say Right or Wrong.
  */
 @Composable
-fun SuggestionsBanner(vm: AppViewModel, ai: AiViewModel = viewModel()) {
-    val state by ai.state.collectAsStateWithLifecycle()
-    val version by ai.version.collectAsStateWithLifecycle()
+fun SuggestionsBanner(vm: AppViewModel) {
     val videos by vm.visibleVideos.collectAsStateWithLifecycle()
     val meta by vm.meta.collectAsStateWithLifecycle()
-    var withSuggestions by remember { mutableStateOf<List<VideoItem>>(emptyList()) }
-
-    // Comparing every untagged video with every tagged one can take a moment: do it off the UI thread.
-    LaunchedEffect(state is AiState.Ready, version, videos, meta) {
-        withSuggestions = if (state !is AiState.Ready) emptyList() else withContext(Dispatchers.Default) {
-            videos.filter { meta[it.id]?.tags.isNullOrEmpty() && ai.suggestOrInvent(it.id, meta, videos, 4).isNotEmpty() }
-        }
+    val aiTags by vm.aiTags.collectAsStateWithLifecycle()
+    val toCheck = remember(videos, meta, aiTags) {
+        videos.filter { meta[it.id]?.tags.isNullOrEmpty() && !aiTags[it.id].isNullOrEmpty() }
     }
-    if (withSuggestions.isEmpty()) return
+    if (toCheck.isEmpty()) return
 
     Row(
         Modifier
             .fillMaxWidth()
-            .clickable { vm.openFeed("✨ Suggested tags", withSuggestions, 0, suggestions = true) }
+            .clickable { vm.openFeed("\u2728 AI-tagged", toCheck, 0) }
             .background(TokCyan.copy(alpha = 0.15f))
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -259,11 +254,11 @@ fun SuggestionsBanner(vm: AppViewModel, ai: AiViewModel = viewModel()) {
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(
-                "Tag suggestions for ${withSuggestions.size} untagged video${if (withSuggestions.size == 1) "" else "s"}",
+                "AI tagged ${toCheck.size} video${if (toCheck.size == 1) "" else "s"} you haven't tagged",
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                "Watch them and tap a suggestion to add it",
+                "Watch them and tap a \u2728 tag to say Right or Wrong",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

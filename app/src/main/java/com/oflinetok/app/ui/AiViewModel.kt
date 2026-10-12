@@ -3,6 +3,7 @@ package com.oflinetok.app.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.oflinetok.app.ai.AiTagger
 import com.oflinetok.app.ai.ClipModel
 import com.oflinetok.app.ai.ClipPreprocess
 import com.oflinetok.app.ai.EmbeddingStore
@@ -13,6 +14,7 @@ import com.oflinetok.app.data.VideoItem
 import com.oflinetok.app.data.VideoMeta
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -121,6 +123,7 @@ class AiViewModel(app: Application) : AndroidViewModel(app) {
             tagTexts.clear()
             vocabulary = null
             vocabularyFile.delete()
+            _aiTags.value = emptyMap()
             store.delete()
             ModelFiles.delete(getApplication())
             _state.value = AiState.Off
@@ -191,35 +194,36 @@ class AiViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /**
-     * Up to [limit] tags for this video, best first. A tag qualifies when the video looks like
-     * the videos already carrying it, or when CLIP thinks the tag's name describes the video.
-     */
-    fun suggestTags(id: Long, meta: Map<Long, VideoMeta>, videos: List<VideoItem>, limit: Int = 5): List<String> {
-        val target = embeddings[id]?.vector ?: return emptyList()
-        val own = meta[id]?.tags.orEmpty()
+    /** The AI's own tags per video (separate from the user's), recomputed by [retag]. */
+    private val _aiTags = MutableStateFlow<Map<Long, List<String>>>(emptyMap())
+    val aiTags: StateFlow<Map<Long, List<String>>> = _aiTags.asStateFlow()
+    private var retagJob: Job? = null
 
-        // Similarity to every tagged video, grouped by tag.
-        val byTag = HashMap<String, MutableList<Float>>()
-        for (v in videos) {
-            if (v.id == id) continue
-            val tags = meta[v.id]?.tags ?: continue
-            if (tags.isEmpty()) continue
-            val e = embeddings[v.id]?.vector ?: continue
-            val sim = ClipPreprocess.dot(target, e)
-            for (t in tags) if (t !in own) byTag.getOrPut(t) { mutableListOf() } += sim
+    /**
+     * Recomputes every video's AI tags in the background (see [AiTagger]). Call when tags,
+     * rejections, the video list or the analysis results change; bursts are coalesced.
+     */
+    fun retag(meta: Map<Long, VideoMeta>, videos: List<VideoItem>, never: Set<String>) {
+        retagJob?.cancel()
+        if (_state.value !is AiState.Ready) {
+            _aiTags.value = emptyMap()
+            return
         }
-        val scores = HashMap<String, Float>()
-        for ((tag, sims) in byTag) {
-            val top = sims.sortedDescending().take(3)
-            scores[tag] = (top.average().toFloat() - KNN_FLOOR) / KNN_RANGE
+        retagJob = viewModelScope.launch(Dispatchers.Default) {
+            delay(300)
+            val ideaVectors = vocabulary
+            val input = AiTagger.Input(
+                ids = videos.map { it.id },
+                embeddings = HashMap<Long, FloatArray>().apply { embeddings.forEach { (id, e) -> put(id, e.vector) } },
+                userTags = meta.mapValues { it.value.tags }.filterValues { it.isNotEmpty() },
+                rejected = meta.mapValues { it.value.rejectedAi }.filterValues { it.isNotEmpty() },
+                never = never,
+                tagTexts = HashMap(tagTexts),
+                ideas = ideaVectors?.let { v -> TagVocabulary.CONCEPTS.mapIndexed { i, c -> c.label() to v[i] } }
+                    ?: emptyList(),
+            )
+            _aiTags.value = AiTagger.tagAll(input)
         }
-        for ((tag, text) in tagTexts) {
-            if (tag in own) continue
-            val zeroShot = (ClipPreprocess.dot(target, text) - TEXT_FLOOR) / TEXT_RANGE
-            scores[tag] = maxOf(scores[tag] ?: Float.NEGATIVE_INFINITY, zeroShot)
-        }
-        return scores.filterValues { it >= 0.5f }.entries.sortedByDescending { it.value }.take(limit).map { it.key }
     }
 
     /** Embeds the idea vocabulary once (a few seconds) and caches it on disk. */
@@ -251,34 +255,6 @@ class AiViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /**
-     * New tag ideas from [TagVocabulary] that CLIP is fairly sure about, in the user's language.
-     * A concept qualifies when its caption similarity is high and it clearly beats the rest
-     * (softmax over all concepts, like CLIP's own zero-shot classification).
-     */
-    fun tagIdeas(id: Long, own: Set<String>, limit: Int = 3): List<String> {
-        val target = embeddings[id]?.vector ?: return emptyList()
-        val vectors = vocabulary ?: return emptyList()
-        val sims = FloatArray(vectors.size) { ClipPreprocess.dot(target, vectors[it]) }
-        val best = sims.maxOrNull() ?: return emptyList()
-        var total = 0.0
-        val weights = DoubleArray(sims.size) { kotlin.math.exp(100.0 * (sims[it] - best)).also { w -> total += w } }
-        return sims.indices
-            .filter { sims[it] >= IDEA_MIN_SIMILARITY && weights[it] / total >= IDEA_MIN_SHARE }
-            .sortedByDescending { sims[it] }
-            .map { TagVocabulary.CONCEPTS[it].label() }
-            .filter { it !in own }
-            .distinct()
-            .take(limit)
-    }
-
-    /**
-     * What to offer for a video: suggestions from the user's own tags, or, when none fit,
-     * ideas for new tags.
-     */
-    fun suggestOrInvent(id: Long, meta: Map<Long, VideoMeta>, videos: List<VideoItem>, limit: Int): List<String> =
-        suggestTags(id, meta, videos, limit).ifEmpty { tagIdeas(id, meta[id]?.tags.orEmpty(), minOf(limit, 3)) }
-
     /** Videos ranked by how well they match [query]; only clear matches are returned. */
     suspend fun search(query: String, videos: List<VideoItem>): List<VideoItem> = withContext(Dispatchers.Default) {
         val q = query.trim()
@@ -297,16 +273,6 @@ class AiViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private companion object {
-        // Calibrated on sample photos: related pictures score ~0.70-0.95 against each other,
-        // unrelated ones ~0.30-0.55; matching captions ~0.26-0.33, unrelated text ~0.13-0.22.
-        const val KNN_FLOOR = 0.60f
-        const val KNN_RANGE = 0.25f // >= 0.725 average similarity suggests the tag
-        const val TEXT_FLOOR = 0.20f
-        const val TEXT_RANGE = 0.10f // >= 0.25 caption similarity suggests the tag
-        // Tag ideas: calibrated on sample photos (room 0.29, bear 0.30, tennis 0.26, cat 0.26
-        // with clear softmax winners; vague pictures stay below).
-        const val IDEA_MIN_SIMILARITY = 0.24f
-        const val IDEA_MIN_SHARE = 0.10
         const val MIN_SEARCH_SCORE = 0.20f
         const val SEARCH_WINDOW = 0.06f
         const val MAX_RESULTS = 150

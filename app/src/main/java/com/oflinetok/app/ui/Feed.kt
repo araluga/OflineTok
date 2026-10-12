@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.Tag
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.SnackbarDuration
@@ -49,6 +50,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -117,6 +119,8 @@ fun HomeFeed(vm: AppViewModel, active: Boolean) {
     val filterActive by vm.filterActive.collectAsStateWithLifecycle()
     val allTags by vm.allTags.collectAsStateWithLifecycle()
     val allFolders by vm.allFolders.collectAsStateWithLifecycle()
+    val allAiTags by vm.allAiTags.collectAsStateWithLifecycle()
+    val homeAiTags by vm.aiTags.collectAsStateWithLifecycle()
     var picking by remember { mutableStateOf(false) }
 
     val topBar: @Composable BoxScope.() -> Unit = {
@@ -176,9 +180,11 @@ fun HomeFeed(vm: AppViewModel, active: Boolean) {
         FeedFilterSheet(
             current = filter,
             allTags = allTags,
+            allAiTags = allAiTags,
             allFolders = allFolders,
             videos = visibleVideos,
             meta = meta,
+            aiTags = homeAiTags,
             onApply = {
                 vm.applyFeedFilter(it)
                 picking = false
@@ -257,7 +263,6 @@ fun OpenedFeed(vm: AppViewModel, request: FeedRequest) {
                 initialPage = request.startIndex,
                 active = true,
                 showHidden = request.showHidden,
-                showSuggestions = request.suggestions,
                 onPageSettled = { _, _ -> },
             ) {
                 IconButton(onClick = vm::closeFeed, modifier = Modifier.align(Alignment.CenterStart)) {
@@ -285,34 +290,15 @@ private fun VideoFeed(
     active: Boolean,
     onPageSettled: (page: Int, count: Int) -> Unit,
     showHidden: Boolean = false,
-    showSuggestions: Boolean = false,
     topBar: @Composable BoxScope.() -> Unit,
 ) {
     val context = LocalContext.current
-    val ai: AiViewModel = viewModel()
-    val aiState by ai.state.collectAsStateWithLifecycle()
-    val aiVersion by ai.version.collectAsStateWithLifecycle()
-    val visibleVideos by vm.visibleVideos.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val meta by vm.meta.collectAsStateWithLifecycle()
     val allTags by vm.allTags.collectAsStateWithLifecycle()
+    val aiTags by vm.aiTags.collectAsStateWithLifecycle()
+    var aiTagMenu by remember { mutableStateOf<Pair<VideoItem, String>?>(null) }
     val snackbar = remember { SnackbarHostState() }
-    fun suggestionsFor(item: VideoItem, limit: Int): List<String> {
-        if (aiState !is AiState.Ready) return emptyList()
-        aiVersion // Re-read when new analysis results arrive.
-        return ai.suggestTags(item.id, meta, visibleVideos, limit)
-    }
-    fun chipsFor(item: VideoItem): List<String> {
-        if (aiState !is AiState.Ready) return emptyList()
-        aiVersion
-        return ai.suggestOrInvent(item.id, meta, visibleVideos, 4)
-    }
-    fun ideasFor(item: VideoItem, exclude: List<String>): List<String> {
-        if (aiState !is AiState.Ready) return emptyList()
-        aiVersion
-        return ai.tagIdeas(item.id, meta[item.id]?.tags.orEmpty()).filter { it !in exclude }
-    }
-
     // Blocked videos drop out at once (and come back in place on Undo). items.size is a key so the
     // growing Home feed is re-read when new rounds are appended.
     val shown = remember(items, items.size, meta, showHidden) {
@@ -391,8 +377,8 @@ private fun VideoFeed(
                 onDoubleTapLike = { vm.like(item.id) },
                 onFavorite = { vm.toggleFavorite(item.id) },
                 onEditTags = { tagEditorFor = item },
-                suggestions = if (showSuggestions) chipsFor(item) else emptyList(),
-                onAddSuggestion = { tag -> vm.addTag(item.id, tag) },
+                aiTags = aiTags[item.id].orEmpty(),
+                onAiTagClick = { tag -> aiTagMenu = item to tag },
                 onShare = { shareVideo(context, item) },
                 onToggleBlocked = {
                     val nowBlocked = !(meta[item.id]?.blocked ?: false)
@@ -408,7 +394,7 @@ private fun VideoFeed(
                     }
                 },
                 onTagClick = { tag ->
-                    val tagged = vm.visibleVideos.value.filter { tag in vm.metaFor(it.id).tags }.shuffled()
+                    val tagged = vm.visibleVideos.value.filter { tag in vm.allTagsOf(it.id) }.shuffled()
                     vm.openFeed("#$tag", tagged, 0)
                 },
             )
@@ -439,8 +425,23 @@ private fun VideoFeed(
             onAdd = { vm.addTag(item.id, it) },
             onRemove = { vm.removeTag(item.id, it) },
             onDismiss = { tagEditorFor = null },
-            suggested = suggestionsFor(item, 8),
-            ideas = ideasFor(item, suggestionsFor(item, 8)),
+            aiTags = aiTags[item.id].orEmpty(),
+            onConfirmAi = { vm.confirmAiTag(item.id, it) },
+            onRejectAi = { vm.rejectAiTag(item.id, it) },
+        )
+    }
+
+    aiTagMenu?.let { (item, tag) ->
+        AiTagDialog(
+            tag = tag,
+            onRight = { vm.confirmAiTag(item.id, tag) },
+            onWrong = { vm.rejectAiTag(item.id, tag) },
+            onNever = { vm.setNeverAiTag(tag, true) },
+            onShowAll = {
+                val tagged = vm.visibleVideos.value.filter { tag in vm.allTagsOf(it.id) }.shuffled()
+                vm.openFeed("\u2728 #$tag", tagged, 0)
+            },
+            onDismiss = { aiTagMenu = null },
         )
     }
 }
@@ -458,8 +459,8 @@ private fun VideoPage(
     onDoubleTapLike: () -> Unit,
     onFavorite: () -> Unit,
     onEditTags: () -> Unit,
-    suggestions: List<String>,
-    onAddSuggestion: (String) -> Unit,
+    aiTags: List<String>,
+    onAiTagClick: (String) -> Unit,
     onShare: () -> Unit,
     onToggleBlocked: () -> Unit,
     onTagClick: (String) -> Unit,
@@ -557,22 +558,6 @@ private fun VideoPage(
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
-            if (suggestions.isNotEmpty()) {
-                Spacer(Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    suggestions.forEach { tag ->
-                        Text(
-                            "✨ #$tag",
-                            style = overlayText.copy(fontWeight = FontWeight.SemiBold, fontSize = 13.sp),
-                            maxLines = 1,
-                            modifier = Modifier
-                                .background(TokCyan.copy(alpha = 0.35f), RoundedCornerShape(50))
-                                .clickable { onAddSuggestion(tag) }
-                                .padding(horizontal = 10.dp, vertical = 5.dp),
-                        )
-                    }
-                }
-            }
             if (meta.tags.isNotEmpty()) {
                 Spacer(Modifier.height(6.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -582,6 +567,19 @@ private fun VideoPage(
                             style = overlayText.copy(fontWeight = FontWeight.SemiBold, fontSize = 14.sp),
                             maxLines = 1,
                             modifier = Modifier.clickable { onTagClick(tag) },
+                        )
+                    }
+                }
+            }
+            if (aiTags.isNotEmpty()) {
+                Spacer(Modifier.height(4.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    aiTags.forEach { tag ->
+                        Text(
+                            "\u2728#$tag",
+                            style = overlayText.copy(color = TokCyan, fontWeight = FontWeight.SemiBold, fontSize = 13.sp),
+                            maxLines = 1,
+                            modifier = Modifier.clickable { onAiTagClick(tag) },
                         )
                     }
                 }
@@ -623,6 +621,40 @@ private fun VideoPage(
             )
         }
     }
+}
+
+/** What to do with an AI tag the user tapped. */
+@Composable
+private fun AiTagDialog(
+    tag: String,
+    onRight: () -> Unit,
+    onWrong: () -> Unit,
+    onNever: () -> Unit,
+    onShowAll: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    fun then(action: () -> Unit): () -> Unit = {
+        action()
+        onDismiss()
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("\u2728 #$tag") },
+        text = {
+            Column {
+                Text(
+                    "The AI added this tag. It's kept apart from your own tags.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                TextButton(onClick = then(onRight)) { Text("Right \u2013 make it my tag") }
+                TextButton(onClick = then(onWrong)) { Text("Wrong for this video") }
+                TextButton(onClick = then(onNever)) { Text("Never suggest #$tag") }
+                TextButton(onClick = then(onShowAll)) { Text("Show all videos with #$tag") }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 /** The ⋮ button: Share and "Don't show this video again". */

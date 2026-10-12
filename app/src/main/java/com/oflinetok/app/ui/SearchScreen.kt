@@ -87,6 +87,11 @@ private fun TagSearch(vm: AppViewModel) {
     val videos by vm.visibleVideos.collectAsStateWithLifecycle()
     val meta by vm.meta.collectAsStateWithLifecycle()
     val allTags by vm.allTags.collectAsStateWithLifecycle()
+    val allAiTags by vm.allAiTags.collectAsStateWithLifecycle()
+    val aiTags by vm.aiTags.collectAsStateWithLifecycle()
+    val neverAi by vm.neverAiTags.collectAsStateWithLifecycle()
+    // Searching covers both the user's tags and the AI's.
+    fun tagsOf(v: com.oflinetok.app.data.VideoItem) = meta[v.id]?.tags.orEmpty() + aiTags[v.id].orEmpty()
 
     var query by rememberSaveable { mutableStateOf("") }
     var selected by rememberSaveable { mutableStateOf(listOf<String>()) }
@@ -96,15 +101,16 @@ private fun TagSearch(vm: AppViewModel) {
 
     val q = normalizeTag(query)
     val visibleTags = allTags.filter { q == null || it.tag.contains(q) || it.tag in selected }
+    val visibleAiTags = allAiTags.filter { q == null || it.tag.contains(q) || it.tag in selected }
 
     // Selected tags must all match (AND). Typed text matches any tag containing it.
     val results = when {
         untagged -> videos.filter { meta[it.id]?.tags.isNullOrEmpty() }
         selected.isNotEmpty() -> videos.filter { v ->
-            val tags = meta[v.id]?.tags.orEmpty()
+            val tags = tagsOf(v)
             selected.all { it in tags } && (q == null || tags.any { it.contains(q) })
         }
-        q != null -> videos.filter { v -> meta[v.id]?.tags.orEmpty().any { it.contains(q) } }
+        q != null -> videos.filter { v -> tagsOf(v).any { it.contains(q) } }
         else -> null
     }
 
@@ -137,7 +143,7 @@ private fun TagSearch(vm: AppViewModel) {
                 .padding(horizontal = 12.dp, vertical = 8.dp),
         )
 
-        if (allTags.isEmpty()) {
+        if (allTags.isEmpty() && allAiTags.isEmpty()) {
             EmptyMessage(
                 "No tags yet",
                 "Tap the # button on any video in your feed to tag it. Then you can find it here.",
@@ -189,6 +195,28 @@ private fun TagSearch(vm: AppViewModel) {
                     },
                     label = { Text("#${t.tag}  ${t.count}") },
                     colors = FilterChipDefaults.filterChipColors(selectedContainerColor = TokPink.copy(alpha = 0.35f)),
+                )
+            }
+            if (visibleAiTags.isNotEmpty()) {
+                // Full width, so in the tag cloud the AI's tags start on their own line.
+                Text(
+                    "\u2728 AI tags",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = TokCyan,
+                    modifier = Modifier
+                        .then(if (results == null) Modifier.fillMaxWidth() else Modifier)
+                        .padding(top = 8.dp, bottom = 2.dp),
+                )
+            }
+            visibleAiTags.forEach { t ->
+                FilterChip(
+                    selected = t.tag in selected,
+                    onClick = {
+                        untagged = false
+                        selected = if (t.tag in selected) selected - t.tag else selected + t.tag
+                    },
+                    label = { Text("\u2728#${t.tag}  ${t.count}") },
+                    colors = FilterChipDefaults.filterChipColors(selectedContainerColor = TokCyan.copy(alpha = 0.35f)),
                 )
             }
         }
@@ -245,6 +273,8 @@ private fun TagSearch(vm: AppViewModel) {
     if (managing) {
         ManageTagsDialog(
             tags = allTags,
+            neverAi = neverAi,
+            onAllowAi = { vm.setNeverAiTag(it, false) },
             onRename = { from, to ->
                 vm.renameTag(from, to)
                 selected = selected.map { if (it == from) normalizeTag(to) ?: it else it }.distinct()
@@ -261,6 +291,8 @@ private fun TagSearch(vm: AppViewModel) {
 @Composable
 private fun ManageTagsDialog(
     tags: List<TagCount>,
+    neverAi: Set<String>,
+    onAllowAi: (String) -> Unit,
     onRename: (String, String) -> Unit,
     onDelete: (String) -> Unit,
     onDismiss: () -> Unit,
@@ -284,6 +316,15 @@ private fun ManageTagsDialog(
                                 IconButton(onClick = { deleting = t.tag }) { Icon(Icons.Filled.Delete, "Delete") }
                             }
                         },
+                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                    )
+                }
+                // AI tags hidden with "Never suggest" can be brought back here.
+                items(neverAi.sorted(), key = { "never-$it" }) { tag ->
+                    ListItem(
+                        headlineContent = { Text("\u2728 #$tag") },
+                        supportingContent = { Text("AI tag you hid") },
+                        trailingContent = { TextButton(onClick = { onAllowAi(tag) }) { Text("Allow") } },
                         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                     )
                 }

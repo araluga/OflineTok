@@ -34,6 +34,9 @@ class MetaStore(context: Context) {
                             liked = obj.optBoolean("liked"),
                             favorite = obj.optBoolean("favorite"),
                             blocked = obj.optBoolean("blocked"),
+                            rejectedAi = obj.optJSONArray("rejectedAi").let { a ->
+                                if (a == null) emptySet() else (0 until a.length()).map { a.getString(it) }.toSet()
+                            },
                         ),
                     )
                 }
@@ -53,7 +56,8 @@ class MetaStore(context: Context) {
                     .put("tags", JSONArray(m.tags.sorted()))
                     .put("liked", m.liked)
                     .put("favorite", m.favorite)
-                    .put("blocked", m.blocked),
+                    .put("blocked", m.blocked)
+                    .put("rejectedAi", JSONArray(m.rejectedAi.sorted())),
             )
         }
         val json = JSONObject().put("version", 1).put("videos", videos).toString()

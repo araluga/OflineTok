@@ -58,9 +58,11 @@ fun FeedFilter.label(): String {
 fun FeedFilterSheet(
     current: FeedFilter,
     allTags: List<TagCount>,
+    allAiTags: List<TagCount>,
     allFolders: List<FolderCount>,
     videos: List<VideoItem>,
     meta: Map<Long, VideoMeta>,
+    aiTags: Map<Long, List<String>>,
     onApply: (FeedFilter) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -71,8 +73,9 @@ fun FeedFilterSheet(
     val q = query.trim().trimStart('#').lowercase()
 
     val tags = allTags.filter { q.isEmpty() || it.tag.contains(q) || it.tag in draft.tags }
+    val aiTagList = allAiTags.filter { q.isEmpty() || it.tag.contains(q) || it.tag in draft.tags }
     val folders = allFolders.filter { q.isEmpty() || it.folder.lowercase().contains(q) || it.folder in draft.folders }
-    val matching = if (draft.isEmpty) videos.size else videos.count { draft.matches(it, meta[it.id]) }
+    val matching = if (draft.isEmpty) videos.size else videos.count { draft.matches(it, meta[it.id], aiTags[it.id]) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -141,6 +144,27 @@ fun FeedFilterSheet(
                                 label = { Text("#${t.tag}  ${t.count}") },
                                 colors = FilterChipDefaults.filterChipColors(
                                     selectedContainerColor = TokPink.copy(alpha = 0.35f),
+                                ),
+                            )
+                        }
+                    }
+                }
+
+                if (aiTagList.isNotEmpty()) {
+                    Spacer(Modifier.height(16.dp))
+                    Text("\u2728 AI tags", style = MaterialTheme.typography.titleSmall, color = TokCyan)
+                    Spacer(Modifier.height(4.dp))
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        aiTagList.forEach { t ->
+                            val on = t.tag in draft.tags
+                            FilterChip(
+                                selected = on,
+                                onClick = {
+                                    draft = draft.copy(tags = if (on) draft.tags - t.tag else draft.tags + t.tag)
+                                },
+                                label = { Text("\u2728#${t.tag}  ${t.count}") },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = TokCyan.copy(alpha = 0.3f),
                                 ),
                             )
                         }
