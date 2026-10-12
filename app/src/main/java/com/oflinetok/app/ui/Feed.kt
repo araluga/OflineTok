@@ -302,6 +302,16 @@ private fun VideoFeed(
         aiVersion // Re-read when new analysis results arrive.
         return ai.suggestTags(item.id, meta, visibleVideos, limit)
     }
+    fun chipsFor(item: VideoItem): List<String> {
+        if (aiState !is AiState.Ready) return emptyList()
+        aiVersion
+        return ai.suggestOrInvent(item.id, meta, visibleVideos, 4)
+    }
+    fun ideasFor(item: VideoItem, exclude: List<String>): List<String> {
+        if (aiState !is AiState.Ready) return emptyList()
+        aiVersion
+        return ai.tagIdeas(item.id, meta[item.id]?.tags.orEmpty()).filter { it !in exclude }
+    }
 
     // Blocked videos drop out at once (and come back in place on Undo). items.size is a key so the
     // growing Home feed is re-read when new rounds are appended.
@@ -381,7 +391,7 @@ private fun VideoFeed(
                 onDoubleTapLike = { vm.like(item.id) },
                 onFavorite = { vm.toggleFavorite(item.id) },
                 onEditTags = { tagEditorFor = item },
-                suggestions = if (showSuggestions) suggestionsFor(item, 4) else emptyList(),
+                suggestions = if (showSuggestions) chipsFor(item) else emptyList(),
                 onAddSuggestion = { tag -> vm.addTag(item.id, tag) },
                 onShare = { shareVideo(context, item) },
                 onToggleBlocked = {
@@ -430,6 +440,7 @@ private fun VideoFeed(
             onRemove = { vm.removeTag(item.id, it) },
             onDismiss = { tagEditorFor = null },
             suggested = suggestionsFor(item, 8),
+            ideas = ideasFor(item, suggestionsFor(item, 8)),
         )
     }
 }

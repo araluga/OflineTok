@@ -199,7 +199,7 @@ private fun SmartSetup(state: AiState, ai: AiViewModel) {
         Text(
             "• Find videos by describing them: \"cat on a sofa\", \"snowy mountains\".\n" +
                 "• Get tag suggestions: OflineTok learns from the videos you've tagged and suggests " +
-                "the same tags for similar videos.\n\n" +
+                "the same tags for similar videos, or comes up with new tags when none fit.\n\n" +
                 "This needs a one-time download of an AI model ($MODEL_MB MB, Wi-Fi recommended). " +
                 "After that everything runs on your phone. Your videos are never uploaded.",
             style = MaterialTheme.typography.bodyMedium,
@@ -242,7 +242,7 @@ fun SuggestionsBanner(vm: AppViewModel, ai: AiViewModel = viewModel()) {
     // Comparing every untagged video with every tagged one can take a moment: do it off the UI thread.
     LaunchedEffect(state is AiState.Ready, version, videos, meta) {
         withSuggestions = if (state !is AiState.Ready) emptyList() else withContext(Dispatchers.Default) {
-            videos.filter { meta[it.id]?.tags.isNullOrEmpty() && ai.suggestTags(it.id, meta, videos).isNotEmpty() }
+            videos.filter { meta[it.id]?.tags.isNullOrEmpty() && ai.suggestOrInvent(it.id, meta, videos, 4).isNotEmpty() }
         }
     }
     if (withSuggestions.isEmpty()) return

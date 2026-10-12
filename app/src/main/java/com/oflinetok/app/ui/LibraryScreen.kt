@@ -71,6 +71,7 @@ fun LibraryScreen(
     val meta by vm.meta.collectAsStateWithLifecycle()
     val allTags by vm.allTags.collectAsStateWithLifecycle()
     val loading by vm.loading.collectAsStateWithLifecycle()
+    val scanning by vm.scanning.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var showBackup by remember { mutableStateOf(false) }
     var showAbout by remember { mutableStateOf(false) }
@@ -105,7 +106,7 @@ fun LibraryScreen(
                 modifier = Modifier.align(Alignment.Center),
             )
             Box(Modifier.align(Alignment.CenterEnd)) {
-                if (loading) {
+                if (loading || scanning) {
                     CircularProgressIndicator(Modifier.padding(12.dp).padding(2.dp), strokeWidth = 2.dp)
                 } else {
                     IconButton(onClick = { vm.load(forceScan = true) }) {

@@ -102,6 +102,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val _loaded = MutableStateFlow(false)
     val loaded: StateFlow<Boolean> = _loaded.asStateFlow()
 
+    /** The background storage walk / duplicate check is running. */
+    private val _scanning = MutableStateFlow(false)
+    val scanning: StateFlow<Boolean> = _scanning.asStateFlow()
+
+    private val duplicatesFile = java.io.File(app.filesDir, "duplicates.tsv")
+    private var scanJob: Job? = null
+    private var lastScanAt = 0L
+    private var lastDuplicateCheck: List<Long>? = null
+
     private val _meta = MutableStateFlow<Map<Long, VideoMeta>>(emptyMap())
     val meta: StateFlow<Map<Long, VideoMeta>> = _meta.asStateFlow()
 
@@ -166,24 +175,61 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _meta.value = withContext(Dispatchers.IO) { metaStore.load() }
     }
 
-    /** forceScan re-walks all storage instead of using the last few minutes' scan. */
+    /**
+     * Two stages so the feed appears quickly:
+     *  1. Gallery videos plus what the last storage walk and duplicate check found (fast).
+     *  2. In the background: walk storage again (on launch, or when [forceScan]) and re-check
+     *     duplicates. New finds join the feed's next round instead of reshuffling it.
+     */
     fun load(forceScan: Boolean = false) {
         if (_loading.value) return
         viewModelScope.launch {
             _loading.value = true
             metaLoad.join() // A tag-filtered feed needs the tags before it can shuffle.
-            val (list, dups) = withContext(Dispatchers.IO) {
-                val list = runCatching { repository.loadVideos(forceScan) }.getOrDefault(emptyList())
-                list to runCatching { duplicateFinder.find(list, _meta.value) }.getOrDefault(emptyMap())
+            val canScan = VideoRepository.canScanAllFiles()
+            val indexed = withContext(Dispatchers.IO) { runCatching { repository.queryMediaStore() }.getOrDefault(emptyList()) }
+            val cached = if (canScan) withContext(Dispatchers.IO) { repository.cachedScan() } else emptyList()
+            val savedDups = if (_duplicates.value.isEmpty()) {
+                withContext(Dispatchers.IO) { DuplicateFinder.load(duplicatesFile) }
+            } else {
+                _duplicates.value
             }
-            val before = visibleNow().map { it.id }
-            _videos.value = list
-            _duplicates.value = dups
-            if (visibleNow().map { it.id } != before || mainFeed.isEmpty()) reshuffle()
+            val quick = repository.merge(indexed, cached)
+            val ids = quick.mapTo(HashSet()) { it.id }
+            applyVideos(quick, savedDups.filter { (copy, keep) -> copy in ids && keep in ids }, reshuffle = true)
             _loading.value = false
             _loaded.value = true
             scheduleExport() // Also creates the first backup for tags made before backups existed.
+
+            val needScan = canScan && (forceScan || System.currentTimeMillis() - lastScanAt > SCAN_INTERVAL_MS)
+            if (scanJob?.isActive == true) return@launch
+            if (!needScan && quick.map { it.id } == lastDuplicateCheck) return@launch
+            scanJob = launch {
+                _scanning.value = true
+                try {
+                    val (full, dups) = withContext(Dispatchers.IO) {
+                        val scanned = if (needScan) repository.freshScan() else cached
+                        val full = repository.merge(indexed, scanned)
+                        full to runCatching { duplicateFinder.find(full, _meta.value) }.getOrDefault(emptyMap())
+                    }
+                    if (needScan) lastScanAt = System.currentTimeMillis()
+                    lastDuplicateCheck = full.map { it.id }
+                    withContext(Dispatchers.IO) { DuplicateFinder.save(duplicatesFile, dups) }
+                    applyVideos(full, dups, reshuffle = false)
+                } finally {
+                    _scanning.value = false
+                }
+            }
         }
+    }
+
+    /** Swaps in a new video list. Reshuffles only when asked (or the feed is empty), never mid-scroll. */
+    private fun applyVideos(list: List<VideoItem>, dups: Map<Long, Long>, reshuffle: Boolean) {
+        val before = visibleNow().map { it.id }
+        _videos.value = list
+        _duplicates.value = dups
+        val changed = visibleNow().map { it.id } != before
+        if ((reshuffle && changed) || mainFeed.isEmpty()) reshuffle()
     }
 
     private fun visible(
@@ -398,6 +444,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun dismissRestoreMessage() {
         _restoreMessage.value = null
+    }
+
+    private companion object {
+        /** A storage walk is repeated on resume at most this often (and on every launch). */
+        const val SCAN_INTERVAL_MS = 5 * 60 * 1000L
     }
 
     private fun persist() {

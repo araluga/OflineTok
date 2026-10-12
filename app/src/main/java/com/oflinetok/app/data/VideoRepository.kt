@@ -6,36 +6,37 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import android.util.AtomicFile
 import java.io.File
 
 /**
  * Finds videos in two ways:
- *  1. MediaStore (the gallery index) — always.
+ *  1. MediaStore (the gallery index): fast, always.
  *  2. A walk over all storage when the app has file access. This finds videos the gallery
  *     skips, e.g. in folders marked with `.nomedia` by WhatsApp, Telegram and other apps.
+ *     A walk can take seconds, so its result is saved and shown on the next launch right away
+ *     while a fresh walk runs in the background.
  *
  * Android/data (where Telegram keeps unsaved videos) is off-limits to every app on Android 11+,
  * so nothing there can be found.
  */
 class VideoRepository(private val context: Context) {
 
-    private var scanCache: List<VideoItem>? = null
-    private var scannedAt = 0L
+    /** A gallery video with its absolute path, used to avoid listing a file twice. */
+    class Indexed(val item: VideoItem, val absolutePath: String?)
 
-    fun loadVideos(forceScan: Boolean = false): List<VideoItem> {
-        val indexed = queryMediaStore()
-        if (!canScanAllFiles()) {
-            scanCache = null
-            return indexed.map { it.first }
-        }
-        val known = indexed.mapNotNullTo(HashSet()) { it.second }
-        val scanned = scanStorage(forceScan).filter { it.uri.path !in known }
-        return (indexed.map { it.first } + scanned).sortedByDescending { it.dateAdded }
+    private val scanCache = AtomicFile(File(context.filesDir, "storage_scan.tsv"))
+
+    /** Gallery + scanned files, without duplicates of the same path, newest first. */
+    fun merge(indexed: List<Indexed>, scanned: List<VideoItem>): List<VideoItem> {
+        val known = indexed.mapNotNullTo(HashSet()) { it.absolutePath }
+        return (indexed.map { it.item } + scanned.filter { it.uri.path !in known })
+            .sortedByDescending { it.dateAdded }
     }
 
-    /** Videos from the gallery index, each with its absolute path (for de-duplicating the scan). */
+    /** Videos from the gallery index. */
     @Suppress("DEPRECATION")
-    private fun queryMediaStore(): List<Pair<VideoItem, String?>> {
+    fun queryMediaStore(): List<Indexed> {
         val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
         } else {
@@ -52,7 +53,7 @@ class VideoRepository(private val context: Context) {
         ) + listOfNotNull(
             MediaStore.Video.Media.RELATIVE_PATH.takeIf { Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q },
         )
-        val videos = mutableListOf<Pair<VideoItem, String?>>()
+        val videos = mutableListOf<Indexed>()
         context.contentResolver.query(
             collection, projection, null, null,
             "${MediaStore.Video.Media.DATE_ADDED} DESC",
@@ -80,20 +81,35 @@ class VideoRepository(private val context: Context) {
                     path = if (relCol >= 0) cursor.getString(relCol).orEmpty() else relativeDir(absolute),
                     size = cursor.getLong(sizeCol),
                 )
-                videos += item to absolute
+                videos += Indexed(item, absolute)
             }
         }
         return videos
     }
 
-    /** Walks every storage volume. Results are cached for a few minutes; a walk can take seconds. */
-    private fun scanStorage(force: Boolean): List<VideoItem> {
-        val cached = scanCache
-        if (!force && cached != null && System.currentTimeMillis() - scannedAt < SCAN_CACHE_MS) return cached
+    /** What the last storage walk found (possibly slightly out of date), or empty. */
+    fun cachedScan(): List<VideoItem> = runCatching {
+        scanCache.readFully().decodeToString().lineSequence().mapNotNull { line ->
+            val parts = line.split('\t')
+            if (parts.size != 4) return@mapNotNull null
+            fileItem(File(parts[0]), size = parts[1].toLong(), modified = parts[2].toLong(), relDir = parts[3])
+        }.toList()
+    }.getOrDefault(emptyList())
+
+    /** Walks every storage volume (takes a while) and saves the result for the next launch. */
+    fun freshScan(): List<VideoItem> {
         val found = mutableListOf<VideoItem>()
         for (root in storageRoots) walk(root, root, depth = 0, out = found)
-        scanCache = found
-        scannedAt = System.currentTimeMillis()
+        val out = scanCache.startWrite()
+        try {
+            out.write(
+                found.joinToString("\n") { "${it.uri.path}\t${it.size}\t${it.dateAdded * 1000}\t${it.path}" }
+                    .toByteArray(),
+            )
+            scanCache.finishWrite(out)
+        } catch (e: Exception) {
+            scanCache.failWrite(out)
+        }
         return found
     }
 
@@ -119,26 +135,26 @@ class VideoRepository(private val context: Context) {
                     lower == ".thumbnails" || lower.startsWith(".trash") || lower == "lost.dir" -> Unit
                     else -> walk(f, root, depth + 1, out)
                 }
-            } else if (f.extension.lowercase() in VIDEO_EXTENSIONS && f.length() >= MIN_SIZE_BYTES) {
-                out += fileItem(f, root)
+            } else if (f.extension.lowercase() in VIDEO_EXTENSIONS) {
+                val size = f.length()
+                if (size < MIN_SIZE_BYTES) continue
+                val relDir = f.parentFile?.absolutePath.orEmpty().removePrefix(root.absolutePath).trim('/') + "/"
+                out += fileItem(f, size, f.lastModified(), relDir)
             }
         }
     }
 
-    private fun fileItem(f: File, root: File): VideoItem {
-        val parent = f.parentFile
-        return VideoItem(
-            id = stableId(f.absolutePath),
-            uri = Uri.fromFile(f),
-            name = f.nameWithoutExtension,
-            durationMs = 0L, // Unknown without opening the file; too slow for a whole-storage scan.
-            dateAdded = f.lastModified() / 1000,
-            folder = parent?.name,
-            fileName = f.name,
-            path = parent?.absolutePath.orEmpty().removePrefix(root.absolutePath).trim('/') + "/",
-            size = f.length(),
-        )
-    }
+    private fun fileItem(f: File, size: Long, modified: Long, relDir: String) = VideoItem(
+        id = stableId(f.absolutePath),
+        uri = Uri.fromFile(f),
+        name = f.nameWithoutExtension,
+        durationMs = 0L, // Unknown without opening the file; too slow for a whole-storage scan.
+        dateAdded = modified / 1000,
+        folder = f.parentFile?.name,
+        fileName = f.name,
+        path = relDir,
+        size = size,
+    )
 
     private fun relativeDir(absolute: String?): String {
         val dir = absolute?.let { File(it).parent } ?: return ""
@@ -149,7 +165,6 @@ class VideoRepository(private val context: Context) {
     companion object {
         private const val MAX_DEPTH = 16
         private const val MIN_SIZE_BYTES = 50_000L // Skips broken stubs and tiny cache fragments.
-        private const val SCAN_CACHE_MS = 5 * 60 * 1000L
         private val VIDEO_EXTENSIONS = setOf("mp4", "m4v", "mkv", "webm", "3gp", "3g2", "mov", "ts", "avi", "flv")
 
         /** True when the app may read files directly, which the storage walk needs. */

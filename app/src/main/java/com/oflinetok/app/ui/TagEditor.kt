@@ -47,6 +47,7 @@ fun TagEditorDialog(
     onRemove: (String) -> Unit,
     onDismiss: () -> Unit,
     suggested: List<String> = emptyList(),
+    ideas: List<String> = emptyList(),
 ) {
     var input by remember { mutableStateOf("") }
     val typed = normalizeTag(input)
@@ -59,7 +60,7 @@ fun TagEditorDialog(
 
     val suggestions = allTags
         .map { it.tag }
-        .filter { it !in meta.tags && it !in suggested && (typed == null || it.contains(typed)) }
+        .filter { it !in meta.tags && it !in suggested && it !in ideas && (typed == null || it.contains(typed)) }
         .take(30)
 
     AlertDialog(
@@ -130,6 +131,23 @@ fun TagEditorDialog(
                                 label = { Text("+ #$tag") },
                                 colors = SuggestionChipDefaults.suggestionChipColors(
                                     containerColor = TokCyan.copy(alpha = 0.18f),
+                                ),
+                            )
+                        }
+                    }
+                }
+
+                if (ideas.isNotEmpty()) {
+                    Spacer(Modifier.height(16.dp))
+                    Text("\u2728 New tag ideas", style = MaterialTheme.typography.labelLarge)
+                    Spacer(Modifier.height(4.dp))
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ideas.forEach { tag ->
+                            SuggestionChip(
+                                onClick = { onAdd(tag) },
+                                label = { Text("+ #$tag") },
+                                colors = SuggestionChipDefaults.suggestionChipColors(
+                                    containerColor = TokPink.copy(alpha = 0.18f),
                                 ),
                             )
                         }

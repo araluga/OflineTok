@@ -8,6 +8,7 @@ import com.oflinetok.app.ai.ClipPreprocess
 import com.oflinetok.app.ai.EmbeddingStore
 import com.oflinetok.app.ai.FrameGrabber
 import com.oflinetok.app.ai.ModelFiles
+import com.oflinetok.app.ai.TagVocabulary
 import com.oflinetok.app.data.VideoItem
 import com.oflinetok.app.data.VideoMeta
 import kotlinx.coroutines.Dispatchers
@@ -64,6 +65,12 @@ class AiViewModel(app: Application) : AndroidViewModel(app) {
     /** Text embeddings of tag names ("a photo of {tag}") for name-based suggestions. */
     private val tagTexts = ConcurrentHashMap<String, FloatArray>()
 
+    /** Text embeddings of [TagVocabulary] concepts, for ideas of brand-new tags. */
+    @Volatile
+    private var vocabulary: List<FloatArray>? = null
+    private var vocabularyJob: Job? = null
+    private val vocabularyFile = File(storeDir, "vocabulary-v${ModelFiles.VERSION}.bin")
+
     init {
         if (ModelFiles.isInstalled(app)) {
             _state.value = AiState.Ready(0, 0, indexing = false)
@@ -112,6 +119,8 @@ class AiViewModel(app: Application) : AndroidViewModel(app) {
             }
             embeddings.clear()
             tagTexts.clear()
+            vocabulary = null
+            vocabularyFile.delete()
             store.delete()
             ModelFiles.delete(getApplication())
             _state.value = AiState.Off
@@ -168,11 +177,14 @@ class AiViewModel(app: Application) : AndroidViewModel(app) {
     /** Prepares name-based suggestions for these tags (runs the text model once per tag). */
     fun prepareTags(tags: List<String>) {
         if (_state.value !is AiState.Ready) return
+        prepareVocabulary()
         val missing = tags.filter { !tagTexts.containsKey(it) }
         if (missing.isEmpty()) return
         viewModelScope.launch(Dispatchers.Default) {
             for (tag in missing) {
-                runCatching { model().embedText("a photo of ${tag.replace('_', ' ')}") }
+                // Tags that came from the idea list use its English wording, which CLIP understands.
+                val prompt = TagVocabulary.forTag(tag)?.prompt ?: "a photo of ${tag.replace('_', ' ')}"
+                runCatching { model().embedText(prompt) }
                     .onSuccess { tagTexts[tag] = it }
             }
             _version.update { it + 1 }
@@ -210,6 +222,63 @@ class AiViewModel(app: Application) : AndroidViewModel(app) {
         return scores.filterValues { it >= 0.5f }.entries.sortedByDescending { it.value }.take(limit).map { it.key }
     }
 
+    /** Embeds the idea vocabulary once (a few seconds) and caches it on disk. */
+    private fun prepareVocabulary() {
+        if (vocabulary != null || vocabularyJob?.isActive == true) return
+        vocabularyJob = viewModelScope.launch(Dispatchers.Default) {
+            val concepts = TagVocabulary.CONCEPTS
+            val signature = concepts.joinToString("|") { it.english }.hashCode()
+            val cached = runCatching {
+                java.io.DataInputStream(vocabularyFile.inputStream().buffered()).use { input ->
+                    if (input.readInt() != signature) return@use null
+                    val dim = input.readInt()
+                    List(concepts.size) { FloatArray(dim) { input.readFloat() } }
+                }
+            }.getOrNull()
+            val vectors = cached ?: runCatching { concepts.map { model().embedText(it.prompt) } }.getOrNull()
+                ?: return@launch
+            if (cached == null) {
+                runCatching {
+                    java.io.DataOutputStream(vocabularyFile.outputStream().buffered()).use { out ->
+                        out.writeInt(signature)
+                        out.writeInt(vectors.first().size)
+                        vectors.forEach { v -> v.forEach(out::writeFloat) }
+                    }
+                }
+            }
+            vocabulary = vectors
+            _version.update { it + 1 }
+        }
+    }
+
+    /**
+     * New tag ideas from [TagVocabulary] that CLIP is fairly sure about, in the user's language.
+     * A concept qualifies when its caption similarity is high and it clearly beats the rest
+     * (softmax over all concepts, like CLIP's own zero-shot classification).
+     */
+    fun tagIdeas(id: Long, own: Set<String>, limit: Int = 3): List<String> {
+        val target = embeddings[id]?.vector ?: return emptyList()
+        val vectors = vocabulary ?: return emptyList()
+        val sims = FloatArray(vectors.size) { ClipPreprocess.dot(target, vectors[it]) }
+        val best = sims.maxOrNull() ?: return emptyList()
+        var total = 0.0
+        val weights = DoubleArray(sims.size) { kotlin.math.exp(100.0 * (sims[it] - best)).also { w -> total += w } }
+        return sims.indices
+            .filter { sims[it] >= IDEA_MIN_SIMILARITY && weights[it] / total >= IDEA_MIN_SHARE }
+            .sortedByDescending { sims[it] }
+            .map { TagVocabulary.CONCEPTS[it].label() }
+            .filter { it !in own }
+            .distinct()
+            .take(limit)
+    }
+
+    /**
+     * What to offer for a video: suggestions from the user's own tags, or, when none fit,
+     * ideas for new tags.
+     */
+    fun suggestOrInvent(id: Long, meta: Map<Long, VideoMeta>, videos: List<VideoItem>, limit: Int): List<String> =
+        suggestTags(id, meta, videos, limit).ifEmpty { tagIdeas(id, meta[id]?.tags.orEmpty(), minOf(limit, 3)) }
+
     /** Videos ranked by how well they match [query]; only clear matches are returned. */
     suspend fun search(query: String, videos: List<VideoItem>): List<VideoItem> = withContext(Dispatchers.Default) {
         val q = query.trim()
@@ -234,6 +303,10 @@ class AiViewModel(app: Application) : AndroidViewModel(app) {
         const val KNN_RANGE = 0.25f // >= 0.725 average similarity suggests the tag
         const val TEXT_FLOOR = 0.20f
         const val TEXT_RANGE = 0.10f // >= 0.25 caption similarity suggests the tag
+        // Tag ideas: calibrated on sample photos (room 0.29, bear 0.30, tennis 0.26, cat 0.26
+        // with clear softmax winners; vague pictures stay below).
+        const val IDEA_MIN_SIMILARITY = 0.24f
+        const val IDEA_MIN_SHARE = 0.10
         const val MIN_SEARCH_SCORE = 0.20f
         const val SEARCH_WINDOW = 0.06f
         const val MAX_RESULTS = 150

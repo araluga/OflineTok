@@ -2,6 +2,7 @@ package com.oflinetok.app.data
 
 import android.content.ContentResolver
 import android.net.Uri
+import java.io.File
 import java.io.FileInputStream
 import java.nio.ByteBuffer
 import java.security.MessageDigest
@@ -75,7 +76,19 @@ class DuplicateFinder(private val resolver: ContentResolver) {
         buffer.flip()
     }
 
-    private companion object {
-        const val CHUNK = 64 * 1024
+    companion object {
+        private const val CHUNK = 64 * 1024
+
+        /** Saved so the next launch hides known duplicates immediately, before checking again. */
+        fun load(file: File): Map<Long, Long> = runCatching {
+            file.readLines().mapNotNull { line ->
+                val (copy, keep) = line.split('\t').takeIf { it.size == 2 } ?: return@mapNotNull null
+                copy.toLong() to keep.toLong()
+            }.toMap()
+        }.getOrDefault(emptyMap())
+
+        fun save(file: File, duplicates: Map<Long, Long>) {
+            runCatching { file.writeText(duplicates.entries.joinToString("\n") { "${it.key}\t${it.value}" }) }
+        }
     }
 }
