@@ -129,13 +129,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _meta.value = withContext(Dispatchers.IO) { metaStore.load() }
     }
 
-    fun load() {
+    /** forceScan re-walks all storage instead of using the last few minutes' scan. */
+    fun load(forceScan: Boolean = false) {
         if (_loading.value) return
         viewModelScope.launch {
             _loading.value = true
             metaLoad.join() // A tag-filtered feed needs the tags before it can shuffle.
             val list = withContext(Dispatchers.IO) {
-                runCatching { repository.loadVideos() }.getOrDefault(emptyList())
+                runCatching { repository.loadVideos(forceScan) }.getOrDefault(emptyList())
             }
             val changed = list.map { it.id } != _videos.value.map { it.id }
             _videos.value = list

@@ -73,7 +73,9 @@ fun VideoGrid(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
-                        Text(formatDuration(video.durationMs), color = Color.White, fontSize = 11.sp)
+                        if (video.durationMs > 0) {
+                            Text(formatDuration(video.durationMs), color = Color.White, fontSize = 11.sp)
+                        }
                         if (m?.liked == true) {
                             Icon(Icons.Filled.Favorite, null, tint = TokPink, modifier = Modifier.size(12.dp))
                         }

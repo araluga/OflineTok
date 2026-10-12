@@ -12,6 +12,7 @@ A TikTok-style video feed for Android that works **completely offline**: it play
 - **Search by tag**: type to filter tags, then select one or more (videos must have *all* selected tags). There's also an **Untagged** filter for finding videos you haven't tagged yet. **Manage** renames, merges, or deletes tags.
 - **Share**: send the current video to Telegram, WhatsApp, Bluetooth, or any other app from the Android share menu.
 - **Updates**: once a day the app quietly asks GitHub whether a newer version exists. If one does, it offers **Update**, **Later**, or **Skip this version**. Nothing is forced. Updating downloads the APK and opens Android's installer. Turn the check off under **Me → ⓘ**. This check and update downloads are the only things the app does online.
+- **Finds hidden videos**: besides the gallery, OflineTok can search all storage, including SD cards, for videos that apps like WhatsApp or Telegram hide from the gallery. On Android 11+ this needs **All files access**; the **Me** screen offers it. Note: videos you only *watched* in Telegram stay in Telegram's private folder, which Android lets no other app read. Save them with **⋮ → Save to Gallery** in Telegram, or turn on *Settings → Data and Storage → Save to Gallery*.
 - **Me**: stats plus grids of your Favorites, Liked, and All videos.
 - Tap to pause/play. Drag the thin bar at the bottom to seek. Videos loop.
 

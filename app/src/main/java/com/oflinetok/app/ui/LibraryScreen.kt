@@ -1,5 +1,6 @@
 package com.oflinetok.app.ui
 
+import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -36,6 +37,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -51,7 +53,16 @@ private val libraryTabs = listOf(
 )
 
 @Composable
-fun LibraryScreen(vm: AppViewModel, partialOnly: Boolean, onManageAccess: () -> Unit) {
+fun LibraryScreen(
+    vm: AppViewModel,
+    partialOnly: Boolean,
+    allFilesAccess: Boolean,
+    onManageAccess: () -> Unit,
+) {
+    val context = LocalContext.current
+    val uiPrefs = remember { context.getSharedPreferences("ui", Context.MODE_PRIVATE) }
+    var hideScanCard by remember { mutableStateOf(uiPrefs.getBoolean("hideScanCard", false)) }
+    var showHelp by remember { mutableStateOf(false) }
     val videos by vm.videos.collectAsStateWithLifecycle()
     val meta by vm.meta.collectAsStateWithLifecycle()
     val allTags by vm.allTags.collectAsStateWithLifecycle()
@@ -93,7 +104,9 @@ fun LibraryScreen(vm: AppViewModel, partialOnly: Boolean, onManageAccess: () -> 
                 if (loading) {
                     CircularProgressIndicator(Modifier.padding(12.dp).padding(2.dp), strokeWidth = 2.dp)
                 } else {
-                    IconButton(onClick = vm::load) { Icon(Icons.Filled.Refresh, "Rescan gallery") }
+                    IconButton(onClick = { vm.load(forceScan = true) }) {
+                        Icon(Icons.Filled.Refresh, "Search for videos again")
+                    }
                 }
             }
         }
@@ -120,6 +133,17 @@ fun LibraryScreen(vm: AppViewModel, partialOnly: Boolean, onManageAccess: () -> 
                     .clickable(onClick = restore)
                     .background(TokCyan.copy(alpha = 0.18f))
                     .padding(12.dp),
+            )
+        }
+
+        if (!allFilesAccess && allFilesAccessNeeded && !hideScanCard) {
+            MissingVideosCard(
+                onAllow = { openAllFilesAccessSettings(context) },
+                onHelp = { showHelp = true },
+                onHide = {
+                    hideScanCard = true
+                    uiPrefs.edit().putBoolean("hideScanCard", true).apply()
+                },
             )
         }
 
@@ -174,7 +198,17 @@ fun LibraryScreen(vm: AppViewModel, partialOnly: Boolean, onManageAccess: () -> 
         BackupDialog(vm = vm, onRestore = restore, onDismiss = { showBackup = false })
     }
     if (showAbout) {
-        AboutDialog(updates = updates, onDismiss = { showAbout = false })
+        AboutDialog(
+            updates = updates,
+            onMissingVideos = {
+                showAbout = false
+                showHelp = true
+            },
+            onDismiss = { showAbout = false },
+        )
+    }
+    if (showHelp) {
+        MissingVideosHelpDialog(onDismiss = { showHelp = false })
     }
 }
 

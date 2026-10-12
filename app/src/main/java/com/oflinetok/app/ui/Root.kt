@@ -37,6 +37,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.oflinetok.app.data.VideoRepository
 
 private enum class Tab(val label: String, val selected: ImageVector, val unselected: ImageVector) {
     Home("Home", Icons.Filled.Home, Icons.Outlined.Home),
@@ -61,10 +62,15 @@ fun OflineTokRoot(vm: AppViewModel = viewModel(), updates: UpdateViewModel = vie
     }
 
     // Re-check on return: the user may have changed access in system settings.
+    var allFiles by remember { mutableStateOf(VideoRepository.canScanAllFiles()) }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         permitted = hasVideoPermission(context)
         partialOnly = hasPartialAccessOnly(context)
-        if (permitted) vm.load()
+        // Just granted "All files access" in settings: search storage right away.
+        val nowAllFiles = VideoRepository.canScanAllFiles()
+        val gained = nowAllFiles && !allFiles
+        allFiles = nowAllFiles
+        if (permitted) vm.load(forceScan = gained)
     }
     LifecycleEventEffect(Lifecycle.Event.ON_STOP) { vm.flushExport() }
 
@@ -122,6 +128,7 @@ fun OflineTokRoot(vm: AppViewModel = viewModel(), updates: UpdateViewModel = vie
                     Tab.Library -> LibraryScreen(
                         vm = vm,
                         partialOnly = partialOnly,
+                        allFilesAccess = allFiles,
                         onManageAccess = { launcher.launch(videoPermissions) },
                     )
                 }

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Videos found by the storage scan can live anywhere, including SD cards. -->
+<paths>
+    <root-path name="root" path="." />
+</paths>

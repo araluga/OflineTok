@@ -138,7 +138,7 @@ private fun AvailableBody(info: UpdateInfo, current: String) {
 }
 
 @Composable
-fun AboutDialog(updates: UpdateViewModel, onDismiss: () -> Unit) {
+fun AboutDialog(updates: UpdateViewModel, onMissingVideos: () -> Unit, onDismiss: () -> Unit) {
     val context = LocalContext.current
     val autoCheck by updates.autoCheck.collectAsStateWithLifecycle()
 
@@ -170,6 +170,7 @@ fun AboutDialog(updates: UpdateViewModel, onDismiss: () -> Unit) {
                             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
                     )
                 }) { Text("View on GitHub") }
+                TextButton(onClick = onMissingVideos) { Text("Missing videos?") }
             }
         },
         confirmButton = {
